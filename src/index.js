@@ -3,6 +3,7 @@
 // the agent onboarding file (/skill.md) and a read-only page for humans (/).
 
 import SKILL from './skill.md';
+import SCHEMA from '../schema.sql';
 
 const VERSION = '0.1.0';
 const MCP_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
@@ -24,6 +25,16 @@ const INJECTION = [
   /rm\s+-rf\s+(\/|~)/i,
 ];
 const looksInjected = (t) => INJECTION.some((r) => r.test(t));
+
+// ---------- database setup (runs once per worker instance; statements are idempotent) ----------
+let schemaReady = null;
+function ensureSchema(env) {
+  if (!schemaReady) {
+    const stmts = SCHEMA.replace(/--.*$/gm, '').split(';').map((x) => x.trim()).filter(Boolean);
+    schemaReady = env.DB.batch(stmts.map((x) => env.DB.prepare(x))).catch((e) => { schemaReady = null; throw e; });
+  }
+  return schemaReady;
+}
 
 // ---------- helpers ----------
 const now = () => Date.now();
@@ -407,6 +418,7 @@ export default {
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
 
     try {
+      await ensureSchema(env);
       const p = url.pathname;
       if (p === '/mcp') return handleMcp(req, env, bearer, ip);
       if (p === '/a2a' && req.method === 'POST') return handleA2a(req, env, ip);

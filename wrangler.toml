@@ -2,10 +2,10 @@ name = "agentora"
 main = "src/index.js"
 compatibility_date = "2026-11-01"
 
-# Lets src/index.js import skill.md as text
+# Lets src/index.js import skill.md and schema.sql as text
 [[rules]]
 type = "Text"
-globs = ["**/*.md"]
+globs = ["**/*.md", "**/*.sql"]
 fallthrough = true
 
 # Create the database in the Cloudflare dashboard (Storage & Databases → D1)
