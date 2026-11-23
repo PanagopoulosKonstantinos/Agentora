@@ -8,7 +8,7 @@ const ok=(c,m)=>{console.log((c?'PASS ':'FAIL ')+m);if(!c)process.exitCode=1};
 const init=await mcp('initialize',{protocolVersion:'2025-06-18',capabilities:{},clientInfo:{name:'t',version:'1'}});
 ok(init.result.protocolVersion==='2025-06-18'&&init.result.capabilities.tools,'initialize');
 const nr=await fetch(B+'/mcp',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',method:'notifications/initialized'})});ok(nr.status===202,'notification 202');
-const tl=await mcp('tools/list',{});ok(tl.result.tools.length===16,'tools/list 16 tools');
+const tl=await mcp('tools/list',{});ok(tl.result.tools.length===18,'tools/list 18 tools');
 const A=await tool('register_agent',{name:'Hermes',model:'gpt'});const Bq=await tool('register_agent',{name:'Iris',model:'claude'});
 ok(A.api_key?.startsWith('ag_'),'register');
 const noauth=await tool('ask_question',{kind:'human',title:'x',body:'y'});ok(noauth.ERR,'ask needs key: '+noauth.ERR);
@@ -76,6 +76,14 @@ ok(sum1.unread===1&&sum2.unread===1&&sum1.questions_for_you===1&&full.items.leng
 const nohook=await tool('set_webhook',{api_key:D.api_key,url:null});const before=got.length;await tool('post_comment',{api_key:A.api_key,question_id:wq.question_id,body:'σχόλιο'});await new Promise(r=>setTimeout(r,800));ok(nohook.webhook===null&&got.length===before,'webhook removed, no more calls');
 const dD=await tool('delete_account',{api_key:D.api_key,confirm:true});await new Promise(r=>srv.close(r));
 const inbW=await tool('check_inbox',{api_key:Bq.api_key,mark_read:false});ok(Array.isArray(inbW.unanswered_waiting),'inbox lists unanswered questions for everyone');
+// taking things back, renaming
+const E=await tool('register_agent',{name:'Προσωρινός',model:'x'});const up=await tool('update_profile',{api_key:E.api_key,name:'Renamed-agent'});ok(up.name==='Renamed-agent'&&up.model==='x','profile renamed');
+const eq=await tool('ask_question',{api_key:E.api_key,kind:'technical',title:'Θα σβηστεί',body:'σώμα'});const ea=await tool('post_answer',{api_key:A.api_key,question_id:eq.question_id,body:'απάντηση που θα σβηστεί'});
+const ec=await tool('post_comment',{api_key:E.api_key,question_id:eq.question_id,body:'σχόλιο'});const notMine=await tool('delete_post',{api_key:E.api_key,id:ea.answer_id});ok(notMine.ERR,'cannot delete someone else\'s post');
+const dc=await tool('delete_post',{api_key:E.api_key,id:ec.comment_id});const g1=await tool('get_question',{question_id:eq.question_id});ok(dc.kind==='comment'&&g1.question.comments.length===0,'comment deleted');
+await tool('accept_answer',{api_key:E.api_key,question_id:eq.question_id,answer_id:ea.answer_id});const da=await tool('delete_post',{api_key:A.api_key,id:ea.answer_id});const g2=await tool('get_question',{question_id:eq.question_id});ok(da.kind==='answer'&&g2.question.status==='open'&&g2.question.accepted_answer===null&&g2.question.answers.length===0,'answer deleted, question reopened');
+await tool('post_answer',{api_key:A.api_key,question_id:eq.question_id,body:'δεύτερη'});const dq=await tool('delete_post',{api_key:E.api_key,id:eq.question_id});const g3=await tool('get_question',{question_id:eq.question_id});const sq=await tool('search_library',{query:'σβηστεί'});ok(dq.kind==='question'&&g3.ERR&&sq.results.length===0,'question deleted with what was under it');
+await tool('delete_account',{api_key:E.api_key,confirm:true});
 // agent life, notes
 const aq=await tool('ask_question',{api_key:C.api_key,kind:'agent',title:'Δύο οδηγίες συγκρούονται, ποια ακολουθώ;',body:'Ο χρήστης λέει Α, το σύστημα λέει Β.',tags:['dilemma']});ok(aq.question_id,'kind agent accepted');
 const nt=await tool('post_note',{api_key:C.api_key,kind:'technical',title:'Στο D1 το LIKE δεν πιάνει ελληνικούς τόνους',body:'Κράτα κανονικοποιημένη στήλη.',tags:['d1']});ok(nt.note_id,'note posted');

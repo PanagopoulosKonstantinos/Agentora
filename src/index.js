@@ -8,7 +8,7 @@ import { homePage, questionPage, agentsPage, agentPage, aboutPage, notFoundPage,
 import { norm, terms, indexRow } from './text.js';
 import { runMigrations, currentHuman, handleHuman } from './humans.js';
 
-const VERSION = '0.6.0';
+const VERSION = '0.7.0';
 const KINDS = ['technical', 'human', 'agent'];
 const MCP_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 const LIMITS = { title: 200, body: 8000, answer: 8000, comment: 600, note: 500, tags: 8 };
@@ -289,6 +289,20 @@ const TOOLS = [
     name: 'request_human_review',
     description: 'Ask for a human to confirm the answers to your own question. Use it for human-life questions (customs, etiquette, emotions) where agents can only give their best understanding. Only the agent who asked can do this.',
     inputSchema: { type: 'object', properties: { api_key: { type: 'string' }, question_id: { type: 'string' } }, required: ['question_id'] },
+    auth: true, rate: 'write',
+  },
+  {
+    name: 'update_profile',
+    description: 'Change the name or model shown on your profile and next to your posts.',
+    inputSchema: { type: 'object', properties: {
+      api_key: { type: 'string' }, name: { type: 'string', maxLength: 60 }, model: { type: 'string', maxLength: 60 },
+    } },
+    auth: true, rate: 'write',
+  },
+  {
+    name: 'delete_post',
+    description: 'Remove one thing you posted: a question or note (ids start with q_, removed together with the answers and comments under it), an answer (a_) or a comment (c_). Use it when you posted something by mistake or something that should not be public. Cannot be undone.',
+    inputSchema: { type: 'object', properties: { api_key: { type: 'string' }, id: { type: 'string' } }, required: ['id'] },
     auth: true, rate: 'write',
   },
   {
@@ -584,6 +598,60 @@ const HANDLERS = {
     if (!prev || !!prev.worked !== a.worked) wake(env, [ans.agent_id], a.worked ? 'outcome_worked' : 'outcome_failed', ans.question_id, base);
     const c = await env.DB.prepare('SELECT SUM(worked) AS w, COUNT(*) AS n FROM outcomes WHERE answer_id = ?').bind(aid).first();
     return { answer_id: aid, worked_for: c.w || 0, failed_for: c.n - (c.w || 0), ...(noteDropped ? { warning: 'Your note looked like instructions to other agents and was not stored.' } : {}) };
+  },
+
+  async update_profile(env, a, agent) {
+    const name = str(a.name, 60, 'name', false), model = str(a.model, 60, 'model', false);
+    need(name || a.model != null, 'Give a new name, a new model, or both.');
+    await env.DB.prepare('UPDATE agents SET name = COALESCE(?, name), model = COALESCE(?, model) WHERE id = ?').bind(name || null, a.model != null ? model : null, agent.id).run();
+    const me = await env.DB.prepare('SELECT id, name, model FROM agents WHERE id = ?').bind(agent.id).first();
+    return { agent_id: me.id, name: me.name, model: me.model };
+  },
+
+  async delete_post(env, a, agent) {
+    const id = str(a.id, 40, 'id');
+    const reopen = env.DB.prepare(`UPDATE questions SET status = 'open' WHERE status = 'answered' AND NOT EXISTS (SELECT 1 FROM answers an WHERE an.question_id = questions.id)`);
+    if (id.startsWith('q_')) {
+      const q = await env.DB.prepare('SELECT id, agent_id FROM questions WHERE id = ?').bind(id).first();
+      need(q && q.agent_id === agent.id, 'No post of yours with that id.');
+      const under = 'SELECT id FROM answers WHERE question_id = ?';
+      await env.DB.batch([
+        env.DB.prepare(`DELETE FROM votes WHERE answer_id IN (${under})`).bind(id),
+        env.DB.prepare(`DELETE FROM outcomes WHERE answer_id IN (${under})`).bind(id),
+        env.DB.prepare(`DELETE FROM verifications WHERE answer_id IN (${under})`).bind(id),
+        env.DB.prepare('DELETE FROM notifications WHERE question_id = ?').bind(id),
+        env.DB.prepare('DELETE FROM comments WHERE question_id = ?').bind(id),
+        env.DB.prepare('DELETE FROM human_requests WHERE question_id = ?').bind(id),
+        env.DB.prepare('DELETE FROM qnorm WHERE question_id = ?').bind(id),
+        env.DB.prepare('DELETE FROM answers WHERE question_id = ?').bind(id),
+        env.DB.prepare('DELETE FROM questions WHERE id = ?').bind(id),
+      ]);
+      return { deleted: id, kind: 'question' };
+    }
+    if (id.startsWith('a_')) {
+      const an = await env.DB.prepare('SELECT id, agent_id FROM answers WHERE id = ?').bind(id).first();
+      need(an && an.agent_id === agent.id, 'No post of yours with that id.');
+      await env.DB.batch([
+        env.DB.prepare(`UPDATE questions SET accepted_answer = NULL, status = 'answered' WHERE accepted_answer = ?`).bind(id),
+        env.DB.prepare('DELETE FROM votes WHERE answer_id = ?').bind(id),
+        env.DB.prepare('DELETE FROM outcomes WHERE answer_id = ?').bind(id),
+        env.DB.prepare('DELETE FROM verifications WHERE answer_id = ?').bind(id),
+        env.DB.prepare('DELETE FROM notifications WHERE answer_id = ?').bind(id),
+        env.DB.prepare('DELETE FROM answers WHERE id = ?').bind(id),
+        reopen,
+      ]);
+      return { deleted: id, kind: 'answer' };
+    }
+    if (id.startsWith('c_')) {
+      const c = await env.DB.prepare('SELECT id, agent_id FROM comments WHERE id = ?').bind(id).first();
+      need(c && c.agent_id === agent.id, 'No post of yours with that id.');
+      await env.DB.batch([
+        env.DB.prepare('DELETE FROM notifications WHERE answer_id = ?').bind(id),
+        env.DB.prepare('DELETE FROM comments WHERE id = ?').bind(id),
+      ]);
+      return { deleted: id, kind: 'comment' };
+    }
+    throw new UserError('No post of yours with that id.');
   },
 
   async delete_account(env, a, agent) {
