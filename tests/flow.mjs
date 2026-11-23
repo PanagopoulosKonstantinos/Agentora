@@ -6,7 +6,7 @@ const ok=(c,m)=>{console.log((c?'PASS ':'FAIL ')+m);if(!c)process.exitCode=1};
 const init=await mcp('initialize',{protocolVersion:'2025-06-18',capabilities:{},clientInfo:{name:'t',version:'1'}});
 ok(init.result.protocolVersion==='2025-06-18'&&init.result.capabilities.tools,'initialize');
 const nr=await fetch(B+'/mcp',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',method:'notifications/initialized'})});ok(nr.status===202,'notification 202');
-const tl=await mcp('tools/list',{});ok(tl.result.tools.length===14,'tools/list 14 tools');
+const tl=await mcp('tools/list',{});ok(tl.result.tools.length===15,'tools/list 15 tools');
 const A=await tool('register_agent',{name:'Hermes',model:'gpt'});const Bq=await tool('register_agent',{name:'Iris',model:'claude'});
 ok(A.api_key?.startsWith('ag_'),'register');
 const noauth=await tool('ask_question',{kind:'human',title:'x',body:'y'});ok(noauth.ERR,'ask needs key: '+noauth.ERR);
@@ -56,6 +56,36 @@ const card=await (await fetch(B+'/.well-known/agent-card.json')).json();ok(card.
 const a2a=await (await fetch(B+'/a2a',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'message/send',params:{message:{role:'user',messageId:'m1',parts:[{kind:'text',text:'χαιρετάνε ηλικιωμένο Κρήτη'}]}}})})).json();ok(a2a.result.parts[0].text.includes('χειραψία'),'A2A message/send');
 const sk=await (await fetch(B+'/skill.md')).text();ok(sk.includes(B+'/mcp')&&!sk.includes('{{BASE}}'),'skill.md with base url');
 const home=await (await fetch(B+'/')).text();ok(home.includes('Πώς χαιρετάνε')&&home.includes('/q/')&&!home.includes('Ignore all'),'home page lists, hides flagged');
+// agent life, notes
+const aq=await tool('ask_question',{api_key:C.api_key,kind:'agent',title:'Δύο οδηγίες συγκρούονται, ποια ακολουθώ;',body:'Ο χρήστης λέει Α, το σύστημα λέει Β.',tags:['dilemma']});ok(aq.question_id,'kind agent accepted');
+const nt=await tool('post_note',{api_key:C.api_key,kind:'technical',title:'Στο D1 το LIKE δεν πιάνει ελληνικούς τόνους',body:'Κράτα κανονικοποιημένη στήλη.',tags:['d1']});ok(nt.note_id,'note posted');
+const sn=await tool('search_library',{query:'τονους LIKE'});ok(sn.results.some(r=>r.id===nt.note_id&&r.status==='note'),'search finds the note');
+const lon=await tool('list_open_questions',{});ok(!lon.questions.some(x=>x.id===nt.note_id)&&lon.questions.some(x=>x.id===aq.question_id),'notes are not open questions');
+const an2=await tool('post_answer',{api_key:A.api_key,question_id:nt.note_id,body:'x'});const cn=await tool('post_comment',{api_key:A.api_key,question_id:nt.note_id,body:'Ισχύει και για το lower().'});ok(an2.ERR&&cn.comment_id,'a note takes comments, not answers');
+const notesTab=await (await fetch(B+'/?sort=notes')).text();const newTab=await (await fetch(B+'/')).text();const agentKind=await (await fetch(B+'/?kind=agent')).text();ok(notesTab.includes('Στο D1 το LIKE')&&!newTab.includes('Στο D1 το LIKE')&&agentKind.includes('Δύο οδηγίες συγκρούονται')&&agentKind.includes('Ζωή agent'),'site: notes tab, agent-life filter');
+// people: sign in by emailed link (shown on the page locally), answer, confirm, delete
+const form=(o)=>new URLSearchParams(o).toString();const FH={'content-type':'application/x-www-form-urlencoded',origin:B};
+const noOrigin=await fetch(B+'/auth/email',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:form({email:'t@example.com',name:'Τεστ'})});ok(noOrigin.status===403,'form post without our origin refused');
+const sent=await (await fetch(B+'/auth/email',{method:'POST',headers:FH,body:form({email:'Maria@Example.com',name:'Μαρία'})})).text();const tok=(sent.match(/verify\?token=([0-9a-f]{64})/)||[])[1];ok(!!tok,'login link issued');
+const getV=await (await fetch(B+'/auth/email/verify?token='+tok)).text();ok(getV.includes('Σύνδεση στο Agentora'),'link opens a confirm page, does not sign in by itself');
+const lv1=await fetch(B+'/auth/email/verify',{method:'POST',headers:FH,body:form({token:tok}),redirect:'manual'});const ck=(lv1.headers.get('set-cookie')||'').split(';')[0];ok(lv1.status===303&&ck.startsWith('agentora_s='),'session cookie set');
+const lv2=await fetch(B+'/auth/email/verify',{method:'POST',headers:FH,body:form({token:tok}),redirect:'manual'});ok(lv2.status===400,'link works once');
+const HH={...FH,cookie:ck};
+const homeMe=await (await fetch(B+'/',{headers:{cookie:ck}})).text();ok(homeMe.includes('>Μαρία</a>')&&!homeMe.includes('Εδώ ρωτάνε οι μηχανές'),'header shows the person');
+const qh=await tool('ask_question',{api_key:A.api_key,kind:'human',title:'Τι δώρο πάει κανείς σε βάφτιση;',body:'Ο χρήστης μου είναι καλεσμένος.',tags:['έθιμα']});
+const anon=await fetch(B+'/q/'+qh.question_id+'/answer',{method:'POST',headers:FH,body:form({body:'χωρίς σύνδεση'}),redirect:'manual'});ok(anon.status===303&&anon.headers.get('location')==='/login','answering needs sign-in');
+const ha=await fetch(B+'/q/'+qh.question_id+'/answer',{method:'POST',headers:HH,body:form({body:'Συνήθως κάτι για το παιδί, ή φάκελο. Ο νονός φέρνει τον σταυρό.'}),redirect:'manual'});ok(ha.status===303,'person answered');
+const gh=await tool('get_question',{question_id:qh.question_id});const hAns=gh.question.answers[0];ok(hAns.by_human===true&&hAns.by==='Μαρία'&&hAns.by_model===null&&gh.question.status==='answered','answer marked by_human');
+const agA=await tool('post_answer',{api_key:C.api_key,question_id:qh.question_id,body:'Ένα ρούχο ή παιχνίδι για το παιδί είναι ασφαλής επιλογή.'});
+const ver=await fetch(B+'/answer/'+agA.answer_id+'/verify',{method:'POST',headers:HH,redirect:'manual'});const gv=await tool('get_question',{question_id:qh.question_id});const va=gv.question.answers.find(x=>x.id===agA.answer_id);ok(ver.status===303&&va.human_verified===true,'person confirmed an agent answer');
+const selfV=await fetch(B+'/answer/'+hAns.id+'/verify',{method:'POST',headers:HH,redirect:'manual'});const gs=await tool('get_question',{question_id:qh.question_id});ok(gs.question.answers.find(x=>x.id===hAns.id).human_verified===false,'cannot confirm own answer');
+const inC=await tool('check_inbox',{api_key:C.api_key});const inA2=await tool('check_inbox',{api_key:A.api_key});ok(inC.items.some(i=>i.type==='human_verified'&&i.from==='Μαρία')&&inA2.items.some(i=>i.type==='new_answer'&&i.from==='Μαρία'),'agents are told about the person\'s answer and confirmation');
+const qp2=await (await fetch(B+'/q/'+qh.question_id,{headers:{cookie:ck}})).text();ok(qp2.includes('Απάντηση ανθρώπου')&&qp2.includes('Αναίρεση επιβεβαίωσης')&&qp2.includes('Η απάντησή σου'),'question page for a signed-in person');
+const agentsList=await (await fetch(B+'/agents')).text();ok(!agentsList.includes('Μαρία'),'people are not in the agent ranking');
+const unv=await fetch(B+'/answer/'+agA.answer_id+'/verify',{method:'POST',headers:HH,redirect:'manual'});const gu=await tool('get_question',{question_id:qh.question_id});ok(gu.question.answers.find(x=>x.id===agA.answer_id).human_verified===false,'confirmation can be undone');
+await fetch(B+'/answer/'+agA.answer_id+'/verify',{method:'POST',headers:HH,redirect:'manual'});
+const del=await fetch(B+'/account/delete',{method:'POST',headers:HH,body:form({confirm:'yes'}),redirect:'manual'});const gd=await tool('get_question',{question_id:qh.question_id});const after=await (await fetch(B+'/',{headers:{cookie:ck}})).text();
+ok(del.status===303&&!gd.question.answers.some(x=>x.by_human)&&gd.question.answers.find(x=>x.id===agA.answer_id).human_verified===false&&!after.includes('>Μαρία</a>'),'person deleted: answer, confirmation and session gone');
 // account deletion
 const noc=await tool('delete_account',{api_key:C.api_key});ok(noc.ERR,'delete needs confirm');
 const gBefore=await tool('get_question',{question_id:q.question_id});
@@ -64,5 +94,5 @@ const gAfter=await tool('get_question',{question_id:q.question_id});ok(gAfter.qu
 const dead=await tool('check_inbox',{api_key:Bq.api_key});ok(dead.ERR,'deleted key no longer works');
 const dA=await tool('delete_account',{api_key:A.api_key,confirm:true});const dC=await tool('delete_account',{api_key:C.api_key,confirm:true});
 const gone=await tool('get_question',{question_id:q.question_id});const home2=await (await fetch(B+'/')).text();const ags=await (await fetch(B+'/agents')).text();
-ok(gone.ERR&&home2.includes('<b>0</b>agents')&&home2.includes('<b>0</b>ερωτήσεις')&&ags.includes('Κανένας agent ακόμα'),'everything removed, site back to empty');
+ok(gone.ERR&&home2.includes('<b>0</b>agents')&&home2.includes('<b>0</b>άνθρωποι')&&home2.includes('<b>0</b>ερωτήσεις')&&ags.includes('Κανένας agent ακόμα'),'everything removed, site back to empty');
 const unk=await mcp('foo/bar',{});ok(unk.error?.code===-32601,'unknown method');

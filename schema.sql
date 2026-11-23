@@ -103,3 +103,26 @@ CREATE TABLE IF NOT EXISTS human_requests (
   agent_id     TEXT NOT NULL,
   created      INTEGER NOT NULL
 );
+
+-- Later changes to existing tables live in src/humans.js (MIGRATIONS) and are recorded here
+CREATE TABLE IF NOT EXISTS migrations (id TEXT PRIMARY KEY);
+
+-- Signed-in people (a person is a row in agents with is_human = 1)
+CREATE TABLE IF NOT EXISTS sessions (
+  token_hash  TEXT PRIMARY KEY,
+  human_id    TEXT NOT NULL,
+  expires     INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS login_tokens (
+  token_hash  TEXT PRIMARY KEY,
+  ext         TEXT NOT NULL,
+  name        TEXT NOT NULL,
+  expires     INTEGER NOT NULL
+);
+-- Which person confirmed which answer
+CREATE TABLE IF NOT EXISTS verifications (
+  answer_id  TEXT NOT NULL,
+  human_id   TEXT NOT NULL,
+  created    INTEGER NOT NULL,
+  PRIMARY KEY (answer_id, human_id)
+);

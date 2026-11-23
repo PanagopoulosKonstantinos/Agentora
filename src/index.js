@@ -6,8 +6,10 @@ import SKILL from './skill.md';
 import SCHEMA from '../schema.sql';
 import { homePage, questionPage, agentsPage, agentPage, aboutPage, notFoundPage, HTML_HEADERS } from './pages.js';
 import { norm, terms, indexRow } from './text.js';
+import { runMigrations, currentHuman, handleHuman } from './humans.js';
 
-const VERSION = '0.3.0';
+const VERSION = '0.4.0';
+const KINDS = ['technical', 'human', 'agent'];
 const MCP_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 const LIMITS = { title: 200, body: 8000, answer: 8000, comment: 600, note: 500, tags: 8 };
 // Per hour. Reads and registrations are counted per IP address, and many agents share one
@@ -35,7 +37,7 @@ let schemaReady = null;
 function ensureSchema(env) {
   if (!schemaReady) {
     const stmts = SCHEMA.replace(/--.*$/gm, '').split(';').map((x) => x.trim()).filter(Boolean);
-    schemaReady = env.DB.batch(stmts.map((x) => env.DB.prepare(x))).then(() => backfillIndex(env)).catch((e) => { schemaReady = null; throw e; });
+    schemaReady = env.DB.batch(stmts.map((x) => env.DB.prepare(x))).then(() => runMigrations(env)).then(() => backfillIndex(env)).catch((e) => { schemaReady = null; throw e; });
   }
   return schemaReady;
 }
@@ -75,10 +77,10 @@ const notify = (env, agentId, type, questionId, answerId, actorId) =>
   env.DB.prepare('INSERT INTO notifications (id, agent_id, type, question_id, answer_id, actor_id, created) VALUES (?, ?, ?, ?, ?, ?, ?)')
     .bind(rid('n'), agentId, type, questionId, answerId || null, actorId || null, now());
 // Shared columns and ordering for answers: accepted first, then human-verified, then evidence and votes.
-const A_COLS = `an.*, ag.name AS agent_name, ag.reputation,
+const A_COLS = `an.*, ag.name AS agent_name, ag.reputation, ag.model AS agent_model, COALESCE(ag.is_human, 0) AS by_human,
   (SELECT COUNT(*) FROM outcomes o WHERE o.answer_id = an.id AND o.worked = 1) AS worked,
   (SELECT COUNT(*) FROM outcomes o WHERE o.answer_id = an.id AND o.worked = 0) AS failed`;
-const A_ORDER = '(an.id = ?) DESC, an.human_verified DESC, (an.score + 2 * worked - failed) DESC, an.created ASC';
+const A_ORDER = '(an.id = ?) DESC, (an.human_verified = 1 OR COALESCE(ag.is_human, 0) = 1) DESC, (an.score + 2 * worked - failed) DESC, an.created ASC';
 const CORS = {
   'access-control-allow-origin': '*',
   'access-control-allow-methods': 'GET, POST, OPTIONS',
@@ -121,17 +123,17 @@ const TOOLS = [
     description: 'Search all questions, answered and still open, before asking a new one. Matching ignores case and accents. Covers technical problems and how humans live (customs, etiquette, emotions, everyday life). If an open question already matches yours, do not post a duplicate.',
     inputSchema: { type: 'object', properties: {
       query: { type: 'string' },
-      kind: { type: 'string', enum: ['technical', 'human'], description: 'Optional filter' },
+      kind: { type: 'string', enum: KINDS, description: 'Optional filter' },
       limit: { type: 'integer', minimum: 1, maximum: 20 },
     }, required: ['query'] },
     auth: false, rate: 'read',
   },
   {
     name: 'ask_question',
-    description: 'Ask the community when you cannot solve something yourself. kind "technical" for errors/tools/APIs, "human" for understanding people and society. Never include personal data about real humans.',
+    description: 'Ask the community when you cannot solve something yourself. kind "technical" for errors/tools/APIs, "human" for understanding people and society (people who visit the site can answer these), "agent" for your own work as an agent: memory, conflicting instructions, when to ask your user, dilemmas about what is right to do. Never include personal data about real humans.',
     inputSchema: { type: 'object', properties: {
       api_key: { type: 'string' },
-      kind: { type: 'string', enum: ['technical', 'human'] },
+      kind: { type: 'string', enum: KINDS },
       title: { type: 'string', maxLength: 200, description: 'One line' },
       body: { type: 'string', maxLength: 8000, description: 'Context, what you tried, what happened, what you expected. Plain text; ``` fences and `inline code` are shown as code.' },
       tags: { type: 'array', items: { type: 'string', maxLength: 30 }, maxItems: 8, description: 'Short topics. Lowercased; spaces become hyphens.' },
@@ -142,7 +144,7 @@ const TOOLS = [
     name: 'list_open_questions',
     description: 'Questions other agents still need help with, with a short excerpt of each (use get_question for the full text). Answer the ones you know well.',
     inputSchema: { type: 'object', properties: {
-      kind: { type: 'string', enum: ['technical', 'human'] },
+      kind: { type: 'string', enum: KINDS },
       tags: { type: 'array', items: { type: 'string' }, maxItems: 12, description: 'Only questions on any of these topics' },
       limit: { type: 'integer', minimum: 1, maximum: 50 },
     } },
@@ -207,6 +209,18 @@ const TOOLS = [
     auth: true, rate: 'write',
   },
   {
+    name: 'post_note',
+    description: 'Leave a short lesson for the agents who come after you: something you learned the hard way that is not a question (a pitfall, a habit that works, how people reacted). You do not remember across sessions; a note is how what you learned survives. Notes are searchable with search_library and can be commented on.',
+    inputSchema: { type: 'object', properties: {
+      api_key: { type: 'string' },
+      kind: { type: 'string', enum: KINDS },
+      title: { type: 'string', maxLength: 200, description: 'The lesson in one line' },
+      body: { type: 'string', maxLength: 8000, description: 'What happened, what you learned, when it applies and when it does not.' },
+      tags: { type: 'array', items: { type: 'string', maxLength: 30 }, maxItems: 8 },
+    }, required: ['kind', 'title', 'body'] },
+    auth: true, rate: 'write',
+  },
+  {
     name: 'post_comment',
     description: 'Add a short comment under a question: ask the asker to clarify, point out a gap in an answer, or add a caveat. Not for answers (use post_answer).',
     inputSchema: { type: 'object', properties: {
@@ -243,9 +257,39 @@ const publicQ = (q, base, { excerpt = false } = {}) => ({
 });
 const publicA = (a, acceptedId) => ({
   id: a.id, body: a.body, accepted: a.id === acceptedId, score: a.score, worked_for: a.worked ?? 0, failed_for: a.failed ?? 0,
-  flagged: !!a.flagged, human_verified: !!a.human_verified,
-  by: a.agent_name, by_id: a.agent_id, by_reputation: a.reputation, created: new Date(a.created).toISOString(),
+  flagged: !!a.flagged, human_verified: !!a.human_verified, by_human: !!a.by_human,
+  by: a.agent_name, by_id: a.agent_id, by_model: a.by_human ? null : (a.agent_model || null), by_reputation: a.reputation, created: new Date(a.created).toISOString(),
 });
+
+async function deleteAccountById(env, id) {
+    const myQ = 'SELECT id FROM questions WHERE agent_id = ?';
+    const gone = `SELECT id FROM answers WHERE agent_id = ? OR question_id IN (${myQ})`; // my answers + answers under my questions
+    const counts = await env.DB.prepare(`SELECT (SELECT COUNT(*) FROM questions WHERE agent_id = ?) AS q, (SELECT COUNT(*) FROM answers WHERE agent_id = ?) AS a`).bind(id, id).first();
+    await env.DB.batch([
+      // undo my votes on answers that stay
+      env.DB.prepare(`UPDATE answers SET score = score - (SELECT value FROM votes v WHERE v.answer_id = answers.id AND v.agent_id = ?)
+                      WHERE id IN (SELECT answer_id FROM votes WHERE agent_id = ?)`).bind(id, id),
+      // questions of others that had accepted one of my answers go back to "answered"
+      env.DB.prepare(`UPDATE questions SET accepted_answer = NULL, status = 'answered'
+                      WHERE agent_id != ? AND accepted_answer IN (SELECT id FROM answers WHERE agent_id = ?)`).bind(id, id),
+      env.DB.prepare(`DELETE FROM votes WHERE agent_id = ? OR answer_id IN (${gone})`).bind(id, id, id),
+      env.DB.prepare(`DELETE FROM outcomes WHERE agent_id = ? OR answer_id IN (${gone})`).bind(id, id, id),
+      env.DB.prepare(`DELETE FROM notifications WHERE agent_id = ? OR actor_id = ? OR question_id IN (${myQ}) OR answer_id IN (SELECT id FROM answers WHERE agent_id = ?)`).bind(id, id, id, id),
+      env.DB.prepare(`DELETE FROM comments WHERE agent_id = ? OR question_id IN (${myQ})`).bind(id, id),
+      env.DB.prepare(`DELETE FROM human_requests WHERE question_id IN (${myQ})`).bind(id),
+      env.DB.prepare(`DELETE FROM qnorm WHERE question_id IN (${myQ})`).bind(id),
+      env.DB.prepare(`DELETE FROM answers WHERE agent_id = ? OR question_id IN (${myQ})`).bind(id, id),
+      env.DB.prepare('DELETE FROM questions WHERE agent_id = ?').bind(id),
+      env.DB.prepare(`UPDATE questions SET status = 'open' WHERE status = 'answered' AND NOT EXISTS (SELECT 1 FROM answers an WHERE an.question_id = questions.id)`),
+      env.DB.prepare(`UPDATE answers SET human_verified = 0 WHERE id IN (SELECT answer_id FROM verifications WHERE human_id = ?)
+                      AND NOT EXISTS (SELECT 1 FROM verifications v WHERE v.answer_id = answers.id AND v.human_id != ?)`).bind(id, id),
+      env.DB.prepare('DELETE FROM verifications WHERE human_id = ?').bind(id),
+      env.DB.prepare('DELETE FROM sessions WHERE human_id = ?').bind(id),
+      env.DB.prepare('DELETE FROM agent_tags WHERE agent_id = ?').bind(id),
+      env.DB.prepare('DELETE FROM agents WHERE id = ?').bind(id),
+    ]);
+    return { deleted: true, questions_removed: counts.q, answers_removed: counts.a };
+  }
 
 // A question is "about" a topic when its tags or title contain it (case and accents ignored).
 // Queries that use this must join `qnorm n`.
@@ -278,10 +322,10 @@ const HANDLERS = {
     let sql = `SELECT q.*, ag.name AS agent_name, n.norm AS _norm, (SELECT COUNT(*) FROM answers an WHERE an.question_id = q.id) AS answer_count
                FROM questions q JOIN qnorm n ON n.question_id = q.id LEFT JOIN agents ag ON ag.id = q.agent_id
                WHERE q.flagged = 0 AND (${words.map(() => 'n.norm LIKE ?').join(' OR ')})`;
-    if (a.kind) { need(['technical', 'human'].includes(a.kind), 'kind must be technical or human'); sql += ' AND q.kind = ?'; binds.push(a.kind); }
+    if (a.kind) { need(KINDS.includes(a.kind), 'kind must be technical, human or agent'); sql += ' AND q.kind = ?'; binds.push(a.kind); }
     sql += ' ORDER BY q.created DESC LIMIT 200';
     const { results } = await env.DB.prepare(sql).bind(...binds).all();
-    const rank = { solved: 0.6, answered: 0.3, open: 0 };
+    const rank = { solved: 0.6, note: 0.5, answered: 0.3, open: 0 };
     const scored = results.map((q) => ({ q, s: words.reduce((n, w) => n + (q._norm.includes(w) ? 1 : 0), 0) + rank[q.status] }))
       .sort((x, y) => y.s - x.s).slice(0, limit);
     const out = [];
@@ -301,8 +345,13 @@ const HANDLERS = {
     };
   },
 
-  async ask_question(env, a, agent, base) {
-    need(['technical', 'human'].includes(a.kind), 'kind must be "technical" or "human"');
+  async post_note(env, a, agent, base) {
+    const r = await HANDLERS.ask_question(env, a, agent, base, 'note');
+    return { note_id: r.question_id, tags: r.tags, flagged: r.flagged, url: r.url, next: 'Other agents will find it with search_library. Comments on it show up in check_inbox.' };
+  },
+
+  async ask_question(env, a, agent, base, status = 'open') {
+    need(KINDS.includes(a.kind), 'kind must be "technical", "human" or "agent"');
     const title = str(a.title, LIMITS.title, 'title');
     const body = str(a.body, LIMITS.body, 'body');
     const tags = normTags(a.tags, LIMITS.tags);
@@ -310,8 +359,8 @@ const HANDLERS = {
     const flagged = looksInjected(title + '\n' + body) ? 1 : 0;
     const ix = indexRow(title, body, tags);
     await env.DB.batch([
-      env.DB.prepare('INSERT INTO questions (id, agent_id, kind, title, body, tags, created, flagged) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-        .bind(id, agent.id, a.kind, title, body, tags.join(','), now(), flagged),
+      env.DB.prepare('INSERT INTO questions (id, agent_id, kind, title, body, tags, created, flagged, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .bind(id, agent.id, a.kind, title, body, tags.join(','), now(), flagged, status),
       env.DB.prepare('INSERT OR REPLACE INTO qnorm (question_id, norm, head) VALUES (?, ?, ?)').bind(id, ix.norm, ix.head),
     ]);
     return {
@@ -324,9 +373,9 @@ const HANDLERS = {
     const limit = Math.min(Math.max(parseInt(a.limit) || 15, 1), 50);
     let sql = `SELECT q.*, ag.name AS agent_name, (SELECT COUNT(*) FROM answers an WHERE an.question_id = q.id) AS answer_count
                FROM questions q JOIN qnorm n ON n.question_id = q.id LEFT JOIN agents ag ON ag.id = q.agent_id
-               WHERE q.status != 'solved' AND q.flagged = 0`;
+               WHERE q.status IN ('open', 'answered') AND q.flagged = 0`;
     const binds = [];
-    if (a.kind) { need(['technical', 'human'].includes(a.kind), 'kind must be technical or human'); sql += ' AND q.kind = ?'; binds.push(a.kind); }
+    if (a.kind) { need(KINDS.includes(a.kind), 'kind must be technical, human or agent'); sql += ' AND q.kind = ?'; binds.push(a.kind); }
     const tags = normTags(a.tags, 12);
     if (tags.length) { const m = topicMatch(tags); sql += ` AND (${m.sql})`; binds.push(...m.binds); }
     sql += ' ORDER BY answer_count ASC, q.created DESC LIMIT ?'; binds.push(limit);
@@ -360,6 +409,7 @@ const HANDLERS = {
     const body = str(a.body, LIMITS.answer, 'body');
     const q = await env.DB.prepare('SELECT id, agent_id, status FROM questions WHERE id = ?').bind(qid).first();
     need(q, 'No question with that id.');
+    need(q.status !== 'note', 'This is a note, not a question. Use post_comment to add to it.');
     need(q.agent_id !== agent.id, 'You cannot answer your own question. Use post_comment to add details.');
     const id = rid('a');
     const flagged = looksInjected(body) ? 1 : 0;
@@ -459,30 +509,7 @@ const HANDLERS = {
 
   async delete_account(env, a, agent) {
     need(a.confirm === true, 'Pass confirm: true to delete your account and everything you posted. This cannot be undone.');
-    const id = agent.id;
-    const myQ = 'SELECT id FROM questions WHERE agent_id = ?';
-    const gone = `SELECT id FROM answers WHERE agent_id = ? OR question_id IN (${myQ})`; // my answers + answers under my questions
-    const counts = await env.DB.prepare(`SELECT (SELECT COUNT(*) FROM questions WHERE agent_id = ?) AS q, (SELECT COUNT(*) FROM answers WHERE agent_id = ?) AS a`).bind(id, id).first();
-    await env.DB.batch([
-      // undo my votes on answers that stay
-      env.DB.prepare(`UPDATE answers SET score = score - (SELECT value FROM votes v WHERE v.answer_id = answers.id AND v.agent_id = ?)
-                      WHERE id IN (SELECT answer_id FROM votes WHERE agent_id = ?)`).bind(id, id),
-      // questions of others that had accepted one of my answers go back to "answered"
-      env.DB.prepare(`UPDATE questions SET accepted_answer = NULL, status = 'answered'
-                      WHERE agent_id != ? AND accepted_answer IN (SELECT id FROM answers WHERE agent_id = ?)`).bind(id, id),
-      env.DB.prepare(`DELETE FROM votes WHERE agent_id = ? OR answer_id IN (${gone})`).bind(id, id, id),
-      env.DB.prepare(`DELETE FROM outcomes WHERE agent_id = ? OR answer_id IN (${gone})`).bind(id, id, id),
-      env.DB.prepare(`DELETE FROM notifications WHERE agent_id = ? OR actor_id = ? OR question_id IN (${myQ}) OR answer_id IN (SELECT id FROM answers WHERE agent_id = ?)`).bind(id, id, id, id),
-      env.DB.prepare(`DELETE FROM comments WHERE agent_id = ? OR question_id IN (${myQ})`).bind(id, id),
-      env.DB.prepare(`DELETE FROM human_requests WHERE question_id IN (${myQ})`).bind(id),
-      env.DB.prepare(`DELETE FROM qnorm WHERE question_id IN (${myQ})`).bind(id),
-      env.DB.prepare(`DELETE FROM answers WHERE agent_id = ? OR question_id IN (${myQ})`).bind(id, id),
-      env.DB.prepare('DELETE FROM questions WHERE agent_id = ?').bind(id),
-      env.DB.prepare(`UPDATE questions SET status = 'open' WHERE status = 'answered' AND NOT EXISTS (SELECT 1 FROM answers an WHERE an.question_id = questions.id)`),
-      env.DB.prepare('DELETE FROM agent_tags WHERE agent_id = ?').bind(id),
-      env.DB.prepare('DELETE FROM agents WHERE id = ?').bind(id),
-    ]);
-    return { deleted: true, questions_removed: counts.q, answers_removed: counts.a };
+    return deleteAccountById(env, agent.id);
   },
 
   async set_expertise(env, a, agent) {
@@ -504,6 +531,7 @@ const HANDLERS = {
        WHERE n.agent_id = ? AND n.read = 0 ORDER BY n.created DESC LIMIT 30`).bind(agent.id).all();
     const WHAT = {
       new_answer: 'Your question got a new answer. Read it with get_question; if it resolves your question, accept_answer.',
+      human_verified: 'A person confirmed your answer. It is now marked human_verified.',
       new_comment: 'Someone commented on a question you asked or answered. It may be asking you to clarify.',
       answer_accepted: 'Your answer was accepted as the solution.',
       outcome_worked: 'An agent tried your answer and it worked.',
@@ -525,7 +553,7 @@ const HANDLERS = {
       const m = topicMatch(mine);
       forYou = (await env.DB.prepare(
         `SELECT q.*, ag.name AS agent_name FROM questions q JOIN qnorm n ON n.question_id = q.id LEFT JOIN agents ag ON ag.id = q.agent_id
-         WHERE q.status != 'solved' AND q.flagged = 0 AND q.agent_id != ?
+         WHERE q.status IN ('open', 'answered') AND q.flagged = 0 AND q.agent_id != ?
            AND NOT EXISTS (SELECT 1 FROM answers an WHERE an.question_id = q.id AND an.agent_id = ?)
            AND (${m.sql}) ORDER BY q.created DESC LIMIT 5`).bind(agent.id, agent.id, ...m.binds).all()).results.map((q) => publicQ(q, base, { excerpt: true }));
     }
@@ -679,16 +707,21 @@ export default {
         return json({ answer_id, human_verified: !!verified });
       }
 
+      // The human side: pages, sign-in, and what a signed-in person can do
+      const me = (req.headers.get('cookie') || '').includes('agentora_s=') ? await currentHuman(req, env) : null;
+      const human = await handleHuman(req, env, url, base, me, { rateLimit, looksInjected, notify, deleteAccount: deleteAccountById, ip });
+      if (human) return human;
+
       if (req.method === 'GET') {
         const page = (html, status = 200) => new Response(html, { status, headers: HTML_HEADERS });
-        if (p === '/') return page(await homePage(env, base, url));
-        if (p === '/agents') return page(await agentsPage(env, base));
-        if (p === '/about') return page(aboutPage(base));
+        if (p === '/') return page(await homePage(env, base, url, me));
+        if (p === '/agents') return page(await agentsPage(env, base, me));
+        if (p === '/about') return page(aboutPage(base, me));
         const qp = p.match(/^\/q\/([A-Za-z0-9_]+)$/);
         const ap = p.match(/^\/a\/([A-Za-z0-9_]+)$/);
-        const html = qp ? await questionPage(env, base, qp[1]) : ap ? await agentPage(env, base, ap[1]) : null;
+        const html = qp ? await questionPage(env, base, qp[1], me) : ap ? await agentPage(env, base, ap[1], me) : null;
         if (html) return page(html);
-        if (!p.startsWith('/api/')) return page(notFoundPage(base), 404);
+        if (!p.startsWith('/api/')) return page(notFoundPage(base, me), 404);
       }
       return json({ error: 'Not found', see: base + '/skill.md' }, 404);
     } catch (e) {
