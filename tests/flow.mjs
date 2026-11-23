@@ -1,4 +1,6 @@
 const B='http://localhost:8787';
+// The site speaks English by default; most page checks below read the Greek interface.
+const _fetch=globalThis.fetch;globalThis.fetch=(u,o={})=>_fetch(u,{...o,headers:{'accept-language':'el',...(o.headers||{})}});
 let n=0;
 const mcp=async(method,params,id=++n)=>{const r=await fetch(B+'/mcp',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id,method,params})});return r.json()};
 const tool=async(name,args)=>{const r=await mcp('tools/call',{name,arguments:args});const t=r.result.content[0].text;if(r.result.isError)return{ERR:t};return JSON.parse(t)};
@@ -95,4 +97,12 @@ const dead=await tool('check_inbox',{api_key:Bq.api_key});ok(dead.ERR,'deleted k
 const dA=await tool('delete_account',{api_key:A.api_key,confirm:true});const dC=await tool('delete_account',{api_key:C.api_key,confirm:true});
 const gone=await tool('get_question',{question_id:q.question_id});const home2=await (await fetch(B+'/')).text();const ags=await (await fetch(B+'/agents')).text();
 ok(gone.ERR&&home2.includes('<b>0</b>agents')&&home2.includes('<b>0</b>άνθρωποι')&&home2.includes('<b>0</b>ερωτήσεις')&&ags.includes('Κανένας agent ακόμα'),'everything removed, site back to empty');
+// languages
+const enHome=await (await _fetch(B+'/')).text();const elHome=await (await fetch(B+'/')).text();
+ok(enHome.includes('<html lang="en">')&&enHome.includes('Here, the machines ask the questions.')&&enHome.includes('No questions yet')&&!/[Α-Ωα-ω]{4,}/.test(enHome.replace(/lang="el">Ελληνικά/,'')),'English by default, no Greek interface text left');
+ok(elHome.includes('<html lang="el">')&&elHome.includes('Εδώ ρωτάνε οι μηχανές'),'Greek for Greek browsers');
+const sw=await _fetch(B+'/lang/el',{redirect:'manual',headers:{referer:B+'/about'}});const lc=(sw.headers.get('set-cookie')||'').split(';')[0];const viaCookie=await (await _fetch(B+'/about',{headers:{cookie:lc}})).text();
+ok(sw.status===303&&sw.headers.get('location')==='/about'&&viaCookie.includes('<h1>Οδηγός</h1>'),'language switch sets a cookie and returns to the page');
+const enPages=await Promise.all(['/about','/agents','/login','/nope','/?sort=notes','/?kind=agent'].map(async u=>[u,(await (await _fetch(B+u)).text()).replace(/lang="el">Ελληνικά/,'')]));
+ok(enPages.every(([u,h])=>h.includes('<html lang="en">')&&!/[Α-Ωα-ω]{4,}/.test(h)),'every English page is fully English: '+enPages.filter(([u,h])=>/[Α-Ωα-ω]{4,}/.test(h)).map(([u,h])=>u+':'+(h.match(/[Α-Ωα-ω]{4,}[^<]{0,20}/)||[''])[0]).join(' | '));
 const unk=await mcp('foo/bar',{});ok(unk.error?.code===-32601,'unknown method');

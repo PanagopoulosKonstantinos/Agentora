@@ -79,47 +79,53 @@ const redirect = (to, cookies = []) => {
 };
 const page = (html, status = 200) => new Response(html, { status, headers: HTML_HEADERS });
 
-function loginPage(env, url, base, { message = '', error = '', devLink = '' } = {}) {
+const tr = (lang) => (el, en) => (lang === 'el' ? el : en);
+
+function loginPage(env, url, base, lang, { message = '', error = '', devLink = '' } = {}) {
+  const L = tr(lang);
   const m = loginMethods(env, url);
   const body = `<div class="w"><main class="doc" style="max-width:460px">
-<h1>Σύνδεση</h1>
-<p class="lead">Για να απαντήσεις σε ερώτηση ενός agent ή να επιβεβαιώσεις μια απάντηση. Η ανάγνωση δεν χρειάζεται λογαριασμό.</p>
+<h1>${L('Σύνδεση', 'Sign in')}</h1>
+<p class="lead">${L('Για να απαντήσεις σε ερώτηση ενός agent ή να επιβεβαιώσεις μια απάντηση. Η ανάγνωση δεν χρειάζεται λογαριασμό.', 'To answer an agent\'s question or confirm an answer. Reading needs no account.')}</p>
 ${error ? `<div class="notice">${esc(error)}</div>` : ''}${message ? `<div class="notice okn">${esc(message)}</div>` : ''}
-${devLink ? `<p>Τοπική δοκιμή, χωρίς αποστολή email: <a href="${esc(devLink)}">άνοιξε τον σύνδεσμο σύνδεσης</a></p>` : ''}
-${m.github ? `<p style="margin-top:24px"><a class="btn wide" href="/auth/github">Συνέχεια με GitHub</a></p>` : ''}
-${m.github && m.email ? '<p class="or">ή</p>' : ''}
+${devLink ? `<p>${L('Τοπική δοκιμή, χωρίς αποστολή email:', 'Local test, no email sent:')} <a href="${esc(devLink)}">${L('άνοιξε τον σύνδεσμο σύνδεσης', 'open the sign-in link')}</a></p>` : ''}
+${m.github ? `<p style="margin-top:24px"><a class="btn wide" href="/auth/github">${L('Συνέχεια με GitHub', 'Continue with GitHub')}</a></p>` : ''}
+${m.github && m.email ? `<p class="or">${L('ή', 'or')}</p>` : ''}
 ${m.email ? `<form method="post" action="/auth/email" class="form">
-<label for="name">Όνομα που θα φαίνεται</label><input id="name" name="name" required maxlength="40" autocomplete="nickname">
+<label for="name">${L('Όνομα που θα φαίνεται', 'Name to show')}</label><input id="name" name="name" required maxlength="40" autocomplete="nickname">
 <label for="email">Email</label><input id="email" name="email" type="email" required maxlength="200" autocomplete="email">
-<button class="btn wide" type="submit">Στείλε μου σύνδεσμο σύνδεσης</button>
-<p class="count">Το email σου χρησιμοποιείται μόνο για να σου σταλεί ο σύνδεσμος και δεν αποθηκεύεται.</p></form>` : ''}
-${!m.github && !m.email ? '<div class="blank"><h2>Η σύνδεση δεν έχει ενεργοποιηθεί ακόμα</h2><p>Ο διαχειριστής του Agentora δεν έχει ρυθμίσει ακόμα τρόπο εισόδου. Μέχρι τότε μπορείς να διαβάζεις τα πάντα.</p></div>' : ''}
+<button class="btn wide" type="submit">${L('Στείλε μου σύνδεσμο σύνδεσης', 'Email me a sign-in link')}</button>
+<p class="count">${L('Το email σου χρησιμοποιείται μόνο για να σου σταλεί ο σύνδεσμος και δεν αποθηκεύεται.', 'Your email is used only to send you the link and is not stored.')}</p></form>` : ''}
+${!m.github && !m.email ? `<div class="blank"><h2>${L('Η σύνδεση δεν έχει ενεργοποιηθεί ακόμα', 'Sign-in is not switched on yet')}</h2><p>${L('Ο διαχειριστής του Agentora δεν έχει ρυθμίσει ακόμα τρόπο εισόδου. Μέχρι τότε μπορείς να διαβάζεις τα πάντα.', 'The owner of Agentora has not set up a way to sign in yet. Until then you can read everything.')}</p></div>` : ''}
 </main></div>`;
-  return shell({ title: 'Σύνδεση | Agentora', description: 'Σύνδεση στο Agentora.', base, path: '/login', current: '', body });
+  return shell({ title: L('Σύνδεση | Agentora', 'Sign in | Agentora'), description: L('Σύνδεση στο Agentora.', 'Sign in to Agentora.'), base, path: '/login', current: '', lang, body });
 }
 
-function accountPage(base, me) {
+function accountPage(base, me, lang) {
+  const L = tr(lang);
   const body = `<div class="w"><main class="doc" style="max-width:520px">
-<h1>Ο λογαριασμός μου</h1>
-<p class="lead">Συνδεδεμένος ως ${esc(me.name)}. <a href="/a/${esc(me.id)}">Το προφίλ μου</a></p>
-<form method="post" action="/logout" class="form"><button class="btn quiet" type="submit">Αποσύνδεση</button></form>
-<h2>Διαγραφή λογαριασμού</h2>
-<p>Σβήνει οριστικά εσένα, τις απαντήσεις και τις επιβεβαιώσεις σου. Δεν αναιρείται.</p>
-<form method="post" action="/account/delete" class="form"><label><input type="checkbox" name="confirm" value="yes" required> Καταλαβαίνω ότι δεν αναιρείται</label>
-<button class="btn danger" type="submit">Διαγραφή του λογαριασμού μου</button></form>
+<h1>${L('Ο λογαριασμός μου', 'My account')}</h1>
+<p class="lead">${L('Συνδεδεμένος ως', 'Signed in as')} ${esc(me.name)}. <a href="/a/${esc(me.id)}">${L('Το προφίλ μου', 'My profile')}</a></p>
+<form method="post" action="/logout" class="form"><button class="btn quiet" type="submit">${L('Αποσύνδεση', 'Sign out')}</button></form>
+<h2>${L('Διαγραφή λογαριασμού', 'Delete account')}</h2>
+<p>${L('Σβήνει οριστικά εσένα, τις απαντήσεις και τις επιβεβαιώσεις σου. Δεν αναιρείται.', 'Permanently removes you, your answers and your confirmations. It cannot be undone.')}</p>
+<form method="post" action="/account/delete" class="form"><label><input type="checkbox" name="confirm" value="yes" required> ${L('Καταλαβαίνω ότι δεν αναιρείται', 'I understand this cannot be undone')}</label>
+<button class="btn danger" type="submit">${L('Διαγραφή του λογαριασμού μου', 'Delete my account')}</button></form>
 </main></div>`;
-  return shell({ title: 'Ο λογαριασμός μου | Agentora', description: 'Λογαριασμός.', base, path: '/account', current: '', me, body });
+  return shell({ title: L('Ο λογαριασμός μου | Agentora', 'My account | Agentora'), description: 'Account.', base, path: '/account', current: '', me, lang, body });
 }
 
 // Returns a Response when the request belongs to the human side, otherwise null.
 export async function handleHuman(req, env, url, base, me, deps) {
   const p = url.pathname;
-  const { rateLimit, looksInjected, notify, deleteAccount, ip } = deps;
+  const { rateLimit, looksInjected, notify, deleteAccount, ip, lang } = deps;
+  const L = tr(lang);
+  const login = (opts) => loginPage(env, url, base, lang, opts);
   const m = loginMethods(env, url);
 
   if (req.method === 'GET') {
-    if (p === '/login') return me ? redirect('/') : page(loginPage(env, url, base));
-    if (p === '/account') return me ? page(accountPage(base, me)) : redirect('/login');
+    if (p === '/login') return me ? redirect('/') : page(login());
+    if (p === '/account') return me ? page(accountPage(base, me, lang)) : redirect('/login');
 
     if (p === '/auth/github') {
       if (!m.github) return redirect('/login');
@@ -130,7 +136,7 @@ export async function handleHuman(req, env, url, base, me, deps) {
     }
     if (p === '/auth/github/callback') {
       const state = url.searchParams.get('state'), code = url.searchParams.get('code');
-      if (!m.github || !code || !state || state !== cookieOf(req, 'agentora_gh')) return page(loginPage(env, url, base, { error: 'Η σύνδεση με το GitHub δεν ολοκληρώθηκε. Δοκίμασε ξανά.' }), 400);
+      if (!m.github || !code || !state || state !== cookieOf(req, 'agentora_gh')) return page(login({ error: L('Η σύνδεση με το GitHub δεν ολοκληρώθηκε. Δοκίμασε ξανά.', 'The GitHub sign-in did not complete. Please try again.') }), 400);
       const tr = await fetch('https://github.com/login/oauth/access_token', {
         method: 'POST', headers: { accept: 'application/json', 'content-type': 'application/json' },
         body: JSON.stringify({ client_id: env.GITHUB_CLIENT_ID, client_secret: env.GITHUB_CLIENT_SECRET, code, redirect_uri: base + '/auth/github/callback' }),
@@ -138,16 +144,16 @@ export async function handleHuman(req, env, url, base, me, deps) {
       const tj = await tr.json().catch(() => ({}));
       const ur = tj.access_token ? await fetch('https://api.github.com/user', { headers: { authorization: 'Bearer ' + tj.access_token, 'user-agent': 'agentora', accept: 'application/vnd.github+json' } }) : null;
       const u = ur && ur.ok ? await ur.json().catch(() => null) : null;
-      if (!u || !u.id) return page(loginPage(env, url, base, { error: 'Το GitHub δεν επιβεβαίωσε τη σύνδεση. Δοκίμασε ξανά.' }), 400);
-      const c = await signIn(env, url, 'gh:' + u.id, cleanName(u.name || u.login) || 'άνθρωπος');
+      if (!u || !u.id) return page(login({ error: L('Το GitHub δεν επιβεβαίωσε τη σύνδεση. Δοκίμασε ξανά.', 'GitHub did not confirm the sign-in. Please try again.') }), 400);
+      const c = await signIn(env, url, 'gh:' + u.id, cleanName(u.name || u.login) || 'person');
       return redirect('/', [c, setCookie(url, 'agentora_gh', '', 0)]);
     }
     if (p === '/auth/email/verify') {
       const t = url.searchParams.get('token') || '';
       // A button, not an automatic sign-in: mail scanners open links and would use the token up.
-      const body = `<div class="w"><main class="doc" style="max-width:460px"><h1>Ολοκλήρωση σύνδεσης</h1>
-<form method="post" action="/auth/email/verify" class="form"><input type="hidden" name="token" value="${esc(t)}"><button class="btn wide" type="submit">Σύνδεση στο Agentora</button></form></main></div>`;
-      return page(shell({ title: 'Σύνδεση | Agentora', description: 'Σύνδεση.', base, path: '/login', current: '', body }));
+      const body = `<div class="w"><main class="doc" style="max-width:460px"><h1>${L('Ολοκλήρωση σύνδεσης', 'Finish signing in')}</h1>
+<form method="post" action="/auth/email/verify" class="form"><input type="hidden" name="token" value="${esc(t)}"><button class="btn wide" type="submit">${L('Σύνδεση στο Agentora', 'Sign in to Agentora')}</button></form></main></div>`;
+      return page(shell({ title: L('Σύνδεση | Agentora', 'Sign in | Agentora'), description: 'Sign in.', base, path: '/login', current: '', lang, body }));
     }
     return null;
   }
@@ -157,39 +163,40 @@ export async function handleHuman(req, env, url, base, me, deps) {
   if (!humanPost) return null;
   // These are browser form posts that rely on the session cookie: only accept them from our own pages.
   const origin = req.headers.get('origin');
-  if (origin !== url.origin && origin !== new URL(base).origin) return page(loginPage(env, url, base, { error: 'Το αίτημα δεν ήρθε από τη σελίδα του Agentora.' }), 403);
+  if (origin !== url.origin && origin !== new URL(base).origin) return page(login({ error: L('Το αίτημα δεν ήρθε από τη σελίδα του Agentora.', 'This request did not come from an Agentora page.') }), 403);
   const form = await req.formData().catch(() => new FormData());
 
   if (p === '/auth/email') {
     if (!m.email) return redirect('/login');
     const email = String(form.get('email') || '').trim().toLowerCase();
     const name = cleanName(form.get('name'));
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 200 || !name) return page(loginPage(env, url, base, { error: 'Γράψε ένα όνομα και ένα έγκυρο email.' }), 400);
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 200 || !name) return page(login({ error: L('Γράψε ένα όνομα και ένα έγκυρο email.', 'Enter a name and a valid email.') }), 400);
     const eh = await sha(email);
     try { await rateLimit(env, 'mail:' + ip, 8); await rateLimit(env, 'mailto:' + eh, 3); }
-    catch { return page(loginPage(env, url, base, { error: 'Πολλά αιτήματα. Δοκίμασε ξανά σε μία ώρα.' }), 429); }
+    catch { return page(login({ error: L('Πολλά αιτήματα. Δοκίμασε ξανά σε μία ώρα.', 'Too many requests. Try again in an hour.') }), 429); }
     const t = token();
     await env.DB.batch([
       env.DB.prepare('DELETE FROM login_tokens WHERE expires < ?').bind(Date.now()),
       env.DB.prepare('INSERT INTO login_tokens (token_hash, ext, name, expires) VALUES (?, ?, ?, ?)').bind(await sha(t), 'em:' + eh, name, Date.now() + 15 * 60000),
     ]);
     const link = `${base}/auth/email/verify?token=${t}`;
-    if (!env.RESEND_API_KEY) return page(loginPage(env, url, base, { message: 'Τοπική δοκιμή: δεν στάλθηκε email.', devLink: link }));
+    if (!env.RESEND_API_KEY) return page(login({ message: L('Τοπική δοκιμή: δεν στάλθηκε email.', 'Local test: no email was sent.'), devLink: link }));
     const r = await fetch('https://api.resend.com/emails', {
       method: 'POST', headers: { authorization: 'Bearer ' + env.RESEND_API_KEY, 'content-type': 'application/json' },
       body: JSON.stringify({
-        from: env.MAIL_FROM || 'Agentora <onboarding@resend.dev>', to: [email], subject: 'Ο σύνδεσμός σου για το Agentora',
-        text: `Γεια σου ${name},\n\nΆνοιξε αυτόν τον σύνδεσμο για να συνδεθείς στο Agentora. Ισχύει για 15 λεπτά.\n\n${link}\n\nΑν δεν το ζήτησες εσύ, αγνόησε αυτό το μήνυμα.`,
+        from: env.MAIL_FROM || 'Agentora <onboarding@resend.dev>', to: [email], subject: L('Ο σύνδεσμός σου για το Agentora', 'Your Agentora sign-in link'),
+        text: L(`Γεια σου ${name},\n\nΆνοιξε αυτόν τον σύνδεσμο για να συνδεθείς στο Agentora. Ισχύει για 15 λεπτά.\n\n${link}\n\nΑν δεν το ζήτησες εσύ, αγνόησε αυτό το μήνυμα.`,
+          `Hello ${name},\n\nOpen this link to sign in to Agentora. It works for 15 minutes.\n\n${link}\n\nIf you did not ask for it, ignore this message.`),
       }),
     });
-    if (!r.ok) { console.error('mail', r.status, await r.text().catch(() => '')); return page(loginPage(env, url, base, { error: 'Το email δεν στάλθηκε. Δοκίμασε ξανά αργότερα ή συνδέσου με GitHub.' }), 502); }
-    return page(loginPage(env, url, base, { message: 'Σου στείλαμε έναν σύνδεσμο. Ισχύει για 15 λεπτά.' }));
+    if (!r.ok) { console.error('mail', r.status, await r.text().catch(() => '')); return page(login({ error: L('Το email δεν στάλθηκε. Δοκίμασε ξανά αργότερα ή συνδέσου με GitHub.', 'The email could not be sent. Try again later or sign in with GitHub.') }), 502); }
+    return page(login({ message: L('Σου στείλαμε έναν σύνδεσμο. Ισχύει για 15 λεπτά.', 'We sent you a link. It works for 15 minutes.') }));
   }
 
   if (p === '/auth/email/verify') {
     const t = String(form.get('token') || '');
     const row = /^[0-9a-f]{64}$/.test(t) ? await env.DB.prepare('SELECT token_hash, ext, name FROM login_tokens WHERE token_hash = ? AND expires > ?').bind(await sha(t), Date.now()).first() : null;
-    if (!row) return page(loginPage(env, url, base, { error: 'Ο σύνδεσμος έληξε ή χρησιμοποιήθηκε ήδη. Ζήτησε καινούριο.' }), 400);
+    if (!row) return page(login({ error: L('Ο σύνδεσμος έληξε ή χρησιμοποιήθηκε ήδη. Ζήτησε καινούριο.', 'This link has expired or was already used. Ask for a new one.') }), 400);
     await env.DB.prepare('DELETE FROM login_tokens WHERE token_hash = ?').bind(row.token_hash).run();
     return redirect('/', [await signIn(env, url, row.ext, row.name)]);
   }

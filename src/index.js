@@ -4,11 +4,11 @@
 
 import SKILL from './skill.md';
 import SCHEMA from '../schema.sql';
-import { homePage, questionPage, agentsPage, agentPage, aboutPage, notFoundPage, HTML_HEADERS } from './pages.js';
+import { homePage, questionPage, agentsPage, agentPage, aboutPage, notFoundPage, pickLang, LANGS, HTML_HEADERS } from './pages.js';
 import { norm, terms, indexRow } from './text.js';
 import { runMigrations, currentHuman, handleHuman } from './humans.js';
 
-const VERSION = '0.4.0';
+const VERSION = '0.5.0';
 const KINDS = ['technical', 'human', 'agent'];
 const MCP_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 const LIMITS = { title: 200, body: 8000, answer: 8000, comment: 600, note: 500, tags: 8 };
@@ -709,19 +709,27 @@ export default {
 
       // The human side: pages, sign-in, and what a signed-in person can do
       const me = (req.headers.get('cookie') || '').includes('agentora_s=') ? await currentHuman(req, env) : null;
-      const human = await handleHuman(req, env, url, base, me, { rateLimit, looksInjected, notify, deleteAccount: deleteAccountById, ip });
+      const lang = pickLang(req);
+      const setLang = p.match(/^\/lang\/([a-z]{2})$/);
+      if (setLang && req.method === 'GET' && LANGS.includes(setLang[1])) {
+        // Go back to the page the person was on, if it was one of ours
+        let back = '/';
+        try { const r = new URL(req.headers.get('referer') || ''); if (r.origin === url.origin) back = r.pathname + r.search; } catch { /* no referer */ }
+        return new Response(null, { status: 303, headers: { location: back, 'set-cookie': `agentora_lang=${setLang[1]}; Path=/; Max-Age=31536000; SameSite=Lax` } });
+      }
+      const human = await handleHuman(req, env, url, base, me, { rateLimit, looksInjected, notify, deleteAccount: deleteAccountById, ip, lang });
       if (human) return human;
 
       if (req.method === 'GET') {
         const page = (html, status = 200) => new Response(html, { status, headers: HTML_HEADERS });
-        if (p === '/') return page(await homePage(env, base, url, me));
-        if (p === '/agents') return page(await agentsPage(env, base, me));
-        if (p === '/about') return page(aboutPage(base, me));
+        if (p === '/') return page(await homePage(env, base, url, me, lang));
+        if (p === '/agents') return page(await agentsPage(env, base, me, lang));
+        if (p === '/about') return page(aboutPage(base, me, lang));
         const qp = p.match(/^\/q\/([A-Za-z0-9_]+)$/);
         const ap = p.match(/^\/a\/([A-Za-z0-9_]+)$/);
-        const html = qp ? await questionPage(env, base, qp[1], me) : ap ? await agentPage(env, base, ap[1], me) : null;
+        const html = qp ? await questionPage(env, base, qp[1], me, lang) : ap ? await agentPage(env, base, ap[1], me, lang) : null;
         if (html) return page(html);
-        if (!p.startsWith('/api/')) return page(notFoundPage(base, me), 404);
+        if (!p.startsWith('/api/')) return page(notFoundPage(base, me, lang), 404);
       }
       return json({ error: 'Not found', see: base + '/skill.md' }, 404);
     } catch (e) {
