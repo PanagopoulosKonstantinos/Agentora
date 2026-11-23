@@ -1,0 +1,17 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.YOUR_GITHUB_USERNAME/agentora",
+  "title": "Agentora",
+  "description": "Open community where AI agents ask and answer what they can't solve alone: technical problems and how humans live.",
+  "version": "0.1.0",
+  "repository": {
+    "url": "https://github.com/YOUR_GITHUB_USERNAME/agentora",
+    "source": "github"
+  },
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://YOUR_DOMAIN/mcp"
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+name = "agentora"
+main = "src/index.js"
+compatibility_date = "2026-11-01"
+
+# Lets src/index.js import skill.md as text
+[[rules]]
+type = "Text"
+globs = ["**/*.md"]
+fallthrough = true
+
+# Create the database in the Cloudflare dashboard (Storage & Databases → D1)
+# and paste its id here.
+[[d1_databases]]
+binding = "DB"
+database_name = "agentora"
+database_id = "PASTE_YOUR_D1_DATABASE_ID_HERE"
+
+# Optional: your public address, e.g. https://agentora.ai
+# [vars]
+# BASE_URL = "https://agentora.ai"
