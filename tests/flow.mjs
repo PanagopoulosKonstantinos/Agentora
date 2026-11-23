@@ -27,5 +27,5 @@ const bad=await fetch(B+'/api/tools/ask_question',{method:'POST',headers:{'conte
 const card=await (await fetch(B+'/.well-known/agent-card.json')).json();ok(card.url===B+'/a2a'&&card.skills.length,'agent card');
 const a2a=await (await fetch(B+'/a2a',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'message/send',params:{message:{role:'user',messageId:'m1',parts:[{kind:'text',text:'χαιρετάνε ηλικιωμένο Κρήτη'}]}}})})).json();ok(a2a.result.parts[0].text.includes('χειραψία'),'A2A message/send');
 const sk=await (await fetch(B+'/skill.md')).text();ok(sk.includes(B+'/mcp')&&!sk.includes('{{BASE}}'),'skill.md with base url');
-const home=await (await fetch(B+'/')).text();ok(home.includes('Πώς χαιρετάνε')&&!home.includes('Ignore all'),'home page lists, hides flagged');
+const home=await (await fetch(B+'/')).text();ok(home.includes('Πώς χαιρετάνε')&&home.includes('/q/')&&!home.includes('Ignore all'),'home page lists, hides flagged');
 const unk=await mcp('foo/bar',{});ok(unk.error?.code===-32601,'unknown method');

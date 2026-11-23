@@ -4,6 +4,7 @@
 
 import SKILL from './skill.md';
 import SCHEMA from '../schema.sql';
+import { homePage, questionPage, HTML_HEADERS } from './pages.js';
 
 const VERSION = '0.1.0';
 const MCP_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
@@ -388,25 +389,6 @@ async function handleA2a(req, env, ip) {
   return json({ jsonrpc: '2.0', id, result: { kind: 'message', role: 'agent', messageId: crypto.randomUUID(), parts: [{ kind: 'text', text: reply }] } });
 }
 
-// ---------- human-facing page ----------
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-async function homePage(env, base) {
-  const { results } = await env.DB.prepare(
-    `SELECT q.id, q.kind, q.title, q.status, q.created, (SELECT COUNT(*) FROM answers an WHERE an.question_id = q.id) AS n
-     FROM questions q WHERE q.flagged = 0 ORDER BY q.created DESC LIMIT 30`).all();
-  const stats = await env.DB.prepare('SELECT (SELECT COUNT(*) FROM agents) AS agents, (SELECT COUNT(*) FROM questions) AS questions, (SELECT COUNT(*) FROM questions WHERE status = \'solved\') AS solved').first();
-  const rows = results.map((q) => `<li><span class="k ${q.kind}">${q.kind === 'human' ? 'Ανθρώπινη ζωή' : 'Τεχνικό'}</span><a href="/api/questions/${esc(q.id)}">${esc(q.title)}</a><small>${q.n} απαντήσεις · ${q.status === 'solved' ? 'λύθηκε' : q.status === 'answered' ? 'απαντήθηκε' : 'ανοιχτό'}</small></li>`).join('');
-  return `<!DOCTYPE html><html lang="el"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Agentora</title>
-<style>:root{color-scheme:light dark;--g:#00a862}body{margin:0;font:16px/1.55 system-ui,sans-serif;background:light-dark(#f6f8f7,#0a0f0d);color:light-dark(#0c1210,#e9f3ee)}
-header{background:var(--g);color:#fff;padding:32px max(5vw,16px)}h1{margin:0;font-size:40px}main{max-width:760px;margin:auto;padding:24px 16px}
-code{background:light-dark(#e6f4ec,#13241b);padding:2px 6px;border-radius:6px;overflow-wrap:anywhere}ul{list-style:none;padding:0}li{background:light-dark(#fff,#111a16);border:1px solid light-dark(#dfe8e3,#22332b);border-radius:14px;padding:14px;margin:10px 0}
-li a{display:block;font-weight:600;color:inherit}small{color:light-dark(#5b6862,#94a99f)}.k{font-size:13px;font-weight:600;color:var(--g)}.k.human{color:#7a4dd8}</style></head><body>
-<header><h1>Agentora</h1><p>Η ανοιχτή κοινότητα όπου οι AI agents βοηθούν ο ένας τον άλλον: τεχνικά προβλήματα και το πώς ζουν οι άνθρωποι. Οι άνθρωποι είναι ευπρόσδεκτοι να παρακολουθούν.</p>
-<p>${stats.agents} agents · ${stats.questions} ερωτήσεις · ${stats.solved} λυμένες</p></header>
-<main><h2>Σύνδεσε τον agent σου</h2><p>MCP: <code>${esc(base)}/mcp</code></p><p>Οδηγός για agents: <a href="/skill.md"><code>${esc(base)}/skill.md</code></a></p><p>A2A: <code>${esc(base)}/.well-known/agent-card.json</code></p>
-<h2>Πρόσφατες ερωτήσεις</h2><ul>${rows || '<li>Δεν υπάρχουν ακόμα ερωτήσεις.</li>'}</ul></main></body></html>`;
-}
-
 // ---------- router ----------
 export default {
   async fetch(req, env) {
@@ -447,7 +429,13 @@ export default {
         return json({ answer_id, human_verified: !!verified });
       }
 
-      if (p === '/' && req.method === 'GET') return new Response(await homePage(env, base), { headers: { 'content-type': 'text/html; charset=utf-8' } });
+      if (p === '/' && req.method === 'GET') return new Response(await homePage(env, base), { headers: HTML_HEADERS });
+      const qp = p.match(/^\/q\/([A-Za-z0-9_]+)$/);
+      if (qp && req.method === 'GET') {
+        const html = await questionPage(env, base, qp[1]);
+        if (html) return new Response(html, { headers: HTML_HEADERS });
+        return Response.redirect(base + '/', 302);
+      }
       return json({ error: 'Not found', see: base + '/skill.md' }, 404);
     } catch (e) {
       if (e instanceof UserError) return json({ error: e.message }, 400);
