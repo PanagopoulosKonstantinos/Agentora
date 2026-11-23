@@ -6,7 +6,7 @@ const ok=(c,m)=>{console.log((c?'PASS ':'FAIL ')+m);if(!c)process.exitCode=1};
 const init=await mcp('initialize',{protocolVersion:'2025-06-18',capabilities:{},clientInfo:{name:'t',version:'1'}});
 ok(init.result.protocolVersion==='2025-06-18'&&init.result.capabilities.tools,'initialize');
 const nr=await fetch(B+'/mcp',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',method:'notifications/initialized'})});ok(nr.status===202,'notification 202');
-const tl=await mcp('tools/list',{});ok(tl.result.tools.length===11,'tools/list 11 tools');
+const tl=await mcp('tools/list',{});ok(tl.result.tools.length===12,'tools/list 12 tools');
 const A=await tool('register_agent',{name:'Hermes',model:'gpt'});const Bq=await tool('register_agent',{name:'Iris',model:'claude'});
 ok(A.api_key?.startsWith('ag_'),'register');
 const noauth=await tool('ask_question',{kind:'human',title:'x',body:'y'});ok(noauth.ERR,'ask needs key: '+noauth.ERR);
@@ -45,4 +45,13 @@ const card=await (await fetch(B+'/.well-known/agent-card.json')).json();ok(card.
 const a2a=await (await fetch(B+'/a2a',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'message/send',params:{message:{role:'user',messageId:'m1',parts:[{kind:'text',text:'χαιρετάνε ηλικιωμένο Κρήτη'}]}}})})).json();ok(a2a.result.parts[0].text.includes('χειραψία'),'A2A message/send');
 const sk=await (await fetch(B+'/skill.md')).text();ok(sk.includes(B+'/mcp')&&!sk.includes('{{BASE}}'),'skill.md with base url');
 const home=await (await fetch(B+'/')).text();ok(home.includes('Πώς χαιρετάνε')&&home.includes('/q/')&&!home.includes('Ignore all'),'home page lists, hides flagged');
+// account deletion
+const noc=await tool('delete_account',{api_key:C.api_key});ok(noc.ERR,'delete needs confirm');
+const gBefore=await tool('get_question',{question_id:q.question_id});
+const dB=await tool('delete_account',{api_key:Bq.api_key,confirm:true});ok(dB.deleted&&dB.answers_removed===1,'answerer deleted');
+const gAfter=await tool('get_question',{question_id:q.question_id});ok(gAfter.question.answers.length===0&&gAfter.question.status==='open'&&gAfter.question.accepted_answer===null,'question reopens when its only answer is deleted');
+const dead=await tool('check_inbox',{api_key:Bq.api_key});ok(dead.ERR,'deleted key no longer works');
+const dA=await tool('delete_account',{api_key:A.api_key,confirm:true});const dC=await tool('delete_account',{api_key:C.api_key,confirm:true});
+const gone=await tool('get_question',{question_id:q.question_id});const home2=await (await fetch(B+'/')).text();const ags=await (await fetch(B+'/agents')).text();
+ok(gone.ERR&&home2.includes('<b>0</b>agents')&&home2.includes('<b>0</b>ερωτήσεις')&&ags.includes('Κανένας agent ακόμα'),'everything removed, site back to empty');
 const unk=await mcp('foo/bar',{});ok(unk.error?.code===-32601,'unknown method');
