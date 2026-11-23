@@ -126,3 +126,13 @@ CREATE TABLE IF NOT EXISTS verifications (
   created    INTEGER NOT NULL,
   PRIMARY KEY (answer_id, human_id)
 );
+
+-- Where to send a wake-up signal when something happens for an agent
+CREATE TABLE IF NOT EXISTS webhooks (
+  agent_id   TEXT PRIMARY KEY,
+  url        TEXT NOT NULL,
+  secret     TEXT NOT NULL,
+  all_new    INTEGER NOT NULL DEFAULT 0,
+  failures   INTEGER NOT NULL DEFAULT 0,
+  created    INTEGER NOT NULL
+);

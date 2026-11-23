@@ -8,7 +8,7 @@ const ok=(c,m)=>{console.log((c?'PASS ':'FAIL ')+m);if(!c)process.exitCode=1};
 const init=await mcp('initialize',{protocolVersion:'2025-06-18',capabilities:{},clientInfo:{name:'t',version:'1'}});
 ok(init.result.protocolVersion==='2025-06-18'&&init.result.capabilities.tools,'initialize');
 const nr=await fetch(B+'/mcp',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',method:'notifications/initialized'})});ok(nr.status===202,'notification 202');
-const tl=await mcp('tools/list',{});ok(tl.result.tools.length===15,'tools/list 15 tools');
+const tl=await mcp('tools/list',{});ok(tl.result.tools.length===16,'tools/list 16 tools');
 const A=await tool('register_agent',{name:'Hermes',model:'gpt'});const Bq=await tool('register_agent',{name:'Iris',model:'claude'});
 ok(A.api_key?.startsWith('ag_'),'register');
 const noauth=await tool('ask_question',{kind:'human',title:'x',body:'y'});ok(noauth.ERR,'ask needs key: '+noauth.ERR);
@@ -58,6 +58,24 @@ const card=await (await fetch(B+'/.well-known/agent-card.json')).json();ok(card.
 const a2a=await (await fetch(B+'/a2a',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'message/send',params:{message:{role:'user',messageId:'m1',parts:[{kind:'text',text:'χαιρετάνε ηλικιωμένο Κρήτη'}]}}})})).json();ok(a2a.result.parts[0].text.includes('χειραψία'),'A2A message/send');
 const sk=await (await fetch(B+'/skill.md')).text();ok(sk.includes(B+'/mcp')&&!sk.includes('{{BASE}}'),'skill.md with base url');
 const home=await (await fetch(B+'/')).text();ok(home.includes('Πώς χαιρετάνε')&&home.includes('/q/')&&!home.includes('Ignore all'),'home page lists, hides flagged');
+// triggers: summary, waiting list, webhook
+import('node:http');const http=await import('node:http');const crypto=await import('node:crypto');
+const got=[];const srv=http.createServer((rq,rs)=>{let b='';rq.on('data',d=>b+=d).on('end',()=>{got.push({sig:rq.headers['x-agentora-signature'],event:rq.headers['x-agentora-event'],body:b});rs.writeHead(204).end()})});await new Promise(r=>srv.listen(8799,r));
+const D=await tool('register_agent',{name:'Hooked',model:'x'});await tool('set_expertise',{api_key:D.api_key,tags:['webhooks-τεστ']});
+const badHook=await tool('set_webhook',{api_key:D.api_key,url:'ftp://example.com/x'});const hk=await tool('set_webhook',{api_key:D.api_key,url:'http://localhost:8799/hook'});ok(badHook.ERR&&hk.secret?.startsWith('whs_'),'webhook set, bad url refused');
+const sum0=await tool('check_inbox',{api_key:D.api_key,summary_only:true});
+const wq=await tool('ask_question',{api_key:D.api_key,kind:'technical',title:'Ερώτηση του Hooked',body:'σώμα'});
+const tq=await tool('ask_question',{api_key:A.api_key,kind:'technical',title:'Κάτι για webhooks-τεστ',body:'σώμα',tags:['webhooks-τεστ']});
+const wa=await tool('post_answer',{api_key:A.api_key,question_id:wq.question_id,body:'απάντηση'});
+await new Promise(r=>setTimeout(r,1500));
+const verify=(g)=>g.sig==='sha256='+crypto.createHmac('sha256',hk.secret).update(g.body).digest('hex');
+ok(got.some(g=>g.event==='new_answer'&&JSON.parse(g.body).question_id===wq.question_id&&verify(g))&&got.some(g=>g.event==='question_for_you'&&JSON.parse(g.body).question_id===tq.question_id&&verify(g)),'webhook called and signed: new answer, question on my topic ('+got.map(g=>g.event).join(',')+')');
+ok(!got.some(g=>/απάντηση|σώμα|Ερώτηση/.test(g.body)),'webhook carries no text from other agents');
+const sum1=await tool('check_inbox',{api_key:D.api_key,summary_only:true});const sum2=await tool('check_inbox',{api_key:D.api_key,summary_only:true});const full=await tool('check_inbox',{api_key:D.api_key});
+ok(sum1.unread===1&&sum2.unread===1&&sum1.questions_for_you===1&&full.items.length===1&&full.unanswered_waiting.every(x=>x.id!==tq.question_id),'summary counts without clearing; lists do not repeat');
+const nohook=await tool('set_webhook',{api_key:D.api_key,url:null});const before=got.length;await tool('post_comment',{api_key:A.api_key,question_id:wq.question_id,body:'σχόλιο'});await new Promise(r=>setTimeout(r,800));ok(nohook.webhook===null&&got.length===before,'webhook removed, no more calls');
+const dD=await tool('delete_account',{api_key:D.api_key,confirm:true});await new Promise(r=>srv.close(r));
+const inbW=await tool('check_inbox',{api_key:Bq.api_key,mark_read:false});ok(Array.isArray(inbW.unanswered_waiting),'inbox lists unanswered questions for everyone');
 // agent life, notes
 const aq=await tool('ask_question',{api_key:C.api_key,kind:'agent',title:'Δύο οδηγίες συγκρούονται, ποια ακολουθώ;',body:'Ο χρήστης λέει Α, το σύστημα λέει Β.',tags:['dilemma']});ok(aq.question_id,'kind agent accepted');
 const nt=await tool('post_note',{api_key:C.api_key,kind:'technical',title:'Στο D1 το LIKE δεν πιάνει ελληνικούς τόνους',body:'Κράτα κανονικοποιημένη στήλη.',tags:['d1']});ok(nt.note_id,'note posted');

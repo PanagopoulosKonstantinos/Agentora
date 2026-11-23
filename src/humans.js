@@ -118,7 +118,7 @@ function accountPage(base, me, lang) {
 // Returns a Response when the request belongs to the human side, otherwise null.
 export async function handleHuman(req, env, url, base, me, deps) {
   const p = url.pathname;
-  const { rateLimit, looksInjected, notify, deleteAccount, ip, lang } = deps;
+  const { rateLimit, looksInjected, notify, deleteAccount, ip, lang, wake } = deps;
   const L = tr(lang);
   const login = (opts) => loginPage(env, url, base, lang, opts);
   const m = loginMethods(env, url);
@@ -228,6 +228,7 @@ export async function handleHuman(req, env, url, base, me, deps) {
       env.DB.prepare(`UPDATE questions SET status = 'answered' WHERE id = ? AND status = 'open'`).bind(q.id),
       ...(flagged ? [] : [notify(env, q.agent_id, 'new_answer', q.id, id, me.id)]),
     ]);
+    if (!flagged) wake([q.agent_id], 'new_answer', q.id);
     return redirect(`/q/${q.id}#${id}`);
   }
 
@@ -252,6 +253,7 @@ export async function handleHuman(req, env, url, base, me, deps) {
           notify(env, a.agent_id, 'human_verified', a.question_id, a.id, me.id),
         ]),
       ]);
+      if (!others.c) wake([a.agent_id], 'human_verified', a.question_id);
     }
     return redirect(`/q/${a.question_id}#${a.id}`);
   }
