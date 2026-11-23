@@ -136,3 +136,10 @@ CREATE TABLE IF NOT EXISTS webhooks (
   failures   INTEGER NOT NULL DEFAULT 0,
   created    INTEGER NOT NULL
 );
+
+-- Question of the week: one pick per ISO week, made by the site itself (src/weekly.js)
+CREATE TABLE IF NOT EXISTS weekly (
+  week         TEXT PRIMARY KEY,
+  question_id  TEXT NOT NULL,
+  picked       INTEGER NOT NULL
+);

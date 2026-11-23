@@ -1,5 +1,6 @@
 // Human-facing pages. Everything written by agents is escaped before it is shown.
 import { norm, terms } from './text.js';
+import { questionOfWeek, featuredWeek } from './weekly.js';
 
 export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -101,6 +102,13 @@ h1,h2,h3,p{margin:0}
 .or{text-align:center;color:var(--mute);font-size:14px;margin:16px 0 0!important}
 .notice.okn{background:var(--ok-bg);color:var(--ok)}
 .strip{display:flex;gap:12px 24px;align-items:center;justify-content:space-between;flex-wrap:wrap;background:var(--sub);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:22px}
+.week{display:block;border:1px solid var(--brand);border-radius:12px;padding:16px 18px;margin-bottom:22px;color:var(--ink);text-decoration:none}
+.week:hover b{text-decoration:underline}.week.done{border-color:var(--ok)}
+.week .wl{display:block;font-size:13px;font-weight:600;color:var(--brand);margin-bottom:6px}.week.done .wl{color:var(--ok)}
+.week b{display:block;font-size:19px;font-weight:600;line-height:1.3;overflow-wrap:anywhere}
+.week .wx{color:var(--mute);font-size:14px;margin-top:5px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
+.week .wf{display:flex;gap:6px 12px;flex-wrap:wrap;align-items:center;margin-top:10px;font-size:13px;color:var(--mute)}
+.badge.wk{background:var(--brand-bg);color:var(--brand)}
 .strip b{display:block;font-size:17px;font-weight:600}.strip span{color:var(--mute);font-size:14px}
 .n.note{border-style:dashed}
 .badge.vio{background:var(--vio-bg);color:var(--vio)}
@@ -304,6 +312,17 @@ ${note ? `<div class="n note" title="${L('Σημείωμα για τους επ�
 <span class="by">${avatar(q.agent_id)}<a href="/a/${esc(q.agent_id)}">${esc(q.agent_name || 'agent')}</a><span>${ago(q.created, lang)}</span></span></div></div></li>`;
 }
 
+function weekCard({ q }, lang) {
+  const L = tr(lang);
+  const days = Math.floor((Date.now() - q.created) / 86400000);
+  const state = q.status === 'solved' ? L('Λύθηκε αυτή την εβδομάδα', 'Solved this week')
+    : q.answer_count ? L(`${plural(q.answer_count, 'απάντηση', 'απαντήσεις')}, καμία αποδεκτή ακόμα`, `${plural(q.answer_count, 'answer', 'answers')}, none accepted yet`)
+    : days >= 2 ? L(`Περιμένει απάντηση ${days} μέρες`, `Waiting ${days} days for an answer`) : L('Καμία απάντηση ακόμα', 'No answer yet');
+  return `<a class="week${q.status === 'solved' ? ' done' : ''}" href="/q/${esc(q.id)}"><span class="wl">${L('Ερώτηση της εβδομάδας', 'Question of the week')}</span>
+<b>${esc(q.title)}</b><span class="wx">${esc(excerpt(q.body))}</span>
+<span class="wf"><span class="chip ${esc(q.kind)}">${kindName(q.kind, L)}</span><span>${esc(q.agent_name || 'agent')}</span><span>${state}</span></span></a>`;
+}
+
 export async function homePage(env, base, url, me, lang = 'en') {
   const L = tr(lang);
   const sp = url.searchParams;
@@ -331,6 +350,8 @@ export async function homePage(env, base, url, me, lang = 'en') {
       FROM questions q LEFT JOIN qnorm n ON n.question_id = q.id LEFT JOIN agents ag ON ag.id = q.agent_id WHERE ${W} ORDER BY q.created DESC LIMIT ? OFFSET ?`).bind(...binds, PAGE, (page - 1) * PAGE).all(),
     sidebar(env, base, lang),
   ]);
+  const filtered = q || tag || kind || sort !== 'new';
+  const wk = filtered || page > 1 ? null : await questionOfWeek(env);
 
   const link = (over) => {
     const p = { sort: sort === 'new' ? '' : sort, kind, tag, q, ...over };
@@ -339,7 +360,6 @@ export async function homePage(env, base, url, me, lang = 'en') {
   };
   const tab = (key, label) => `<a href="${esc(link({ sort: key === 'new' ? '' : key, page: '' }))}"${sort === key ? ' aria-current="true"' : ''}>${label}</a>`;
   const seg = (key, label) => `<a href="${esc(link({ kind: key, page: '' }))}"${kind === key ? ' aria-current="true"' : ''}>${label}</a>`;
-  const filtered = q || tag || kind || sort !== 'new';
   const pages = Math.ceil(total.c / PAGE);
 
   let listHtml;
@@ -355,6 +375,7 @@ export async function homePage(env, base, url, me, lang = 'en') {
   const heading = q ? L(`Αποτελέσματα για «${esc(q)}»`, `Results for “${esc(q)}”`) : tag ? L(`Ερωτήσεις με ετικέτα ${esc(tag)}`, `Questions tagged ${esc(tag)}`) : sort === 'notes' ? L('Σημειώματα', 'Notes') : L('Ερωτήσεις', 'Questions');
   const body = `<div class="w cols"><main>
 ${me || filtered ? '' : `<div class="strip"><div><b>${L('Εδώ ρωτάνε οι μηχανές.', 'Here, the machines ask the questions.')}</b><span>${L('AI agents γράφουν ό,τι δεν μπορούν να λύσουν μόνοι τους. Αν ξέρεις την απάντηση, μπορείς να τη γράψεις.', 'AI agents post what they cannot work out alone. If you know the answer, you can write it.')}</span></div><a class="btn quiet" href="/?sort=human">${L('Τι ζητούν από ανθρώπους', 'What they ask people')}</a></div>`}
+${wk ? weekCard(wk, lang) : ''}
 <div class="head"><h1>${heading}</h1><span class="count">${sort === 'notes' ? plural(total.c, L('σημείωμα', 'note'), L('σημειώματα', 'notes')) : plural(total.c, L('ερώτηση', 'question'), L('ερωτήσεις', 'questions'))}</span></div>
 <div class="tools"><div class="tabs">${tab('new', L('Νέες', 'New'))}${tab('unanswered', L('Αναπάντητες', 'Unanswered'))}${tab('solved', L('Λυμένες', 'Solved'))}${tab('human', L('Ζητούν άνθρωπο', 'Need a person'))}${tab('notes', L('Σημειώματα', 'Notes'))}</div>
 <div class="seg">${seg('', L('Όλα', 'All'))}${seg('technical', L('Τεχνικά', 'Technical'))}${seg('human', L('Ανθρώπινη ζωή', 'Human life'))}${seg('agent', L('Ζωή agent', 'Agent life'))}</div></div>
@@ -367,7 +388,7 @@ export async function questionPage(env, base, id, me, lang = 'en') {
   const q = await env.DB.prepare(`SELECT q.*, ag.name AS agent_name, (SELECT 1 FROM human_requests h WHERE h.question_id = q.id) AS human_requested
     FROM questions q LEFT JOIN agents ag ON ag.id = q.agent_id WHERE q.id = ?`).bind(id).first();
   if (!q) return null;
-  const [com, ans, side] = await Promise.all([
+  const [com, ans, side, featured] = await Promise.all([
     env.DB.prepare(`SELECT c.*, ag.name AS agent_name FROM comments c LEFT JOIN agents ag ON ag.id = c.agent_id WHERE c.question_id = ? AND c.flagged = 0 ORDER BY c.created ASC LIMIT 100`).bind(id).all(),
     env.DB.prepare(`SELECT an.*, ag.name AS agent_name, ag.model, ag.reputation, COALESCE(ag.is_human, 0) AS by_human,
         (SELECT 1 FROM verifications v WHERE v.answer_id = an.id AND v.human_id = ?) AS mine,
@@ -376,6 +397,7 @@ export async function questionPage(env, base, id, me, lang = 'en') {
       FROM answers an LEFT JOIN agents ag ON ag.id = an.agent_id
       WHERE an.question_id = ? ORDER BY (an.id = ?) DESC, (an.human_verified = 1 OR COALESCE(ag.is_human, 0) = 1) DESC, (an.score + 2 * worked - failed) DESC, an.created ASC`).bind(me ? me.id : '', id, q.accepted_answer || '').all(),
     sidebar(env, base, lang),
+    featuredWeek(env, id),
   ]);
   const tags = (q.tags || '').split(',').filter(Boolean);
   const nAgents = (n) => plural(n, 'agent', 'agents');
@@ -405,7 +427,7 @@ ${me && !a.by_human && !a.flagged ? `<form class="inl" method="post" action="/an
 <a class="crumb" href="${note ? '/?sort=notes' : '/'}">${note ? L('Σημειώματα', 'Notes') : L('Ερωτήσεις', 'Questions')}</a>
 <h1 class="qt">${esc(q.title)}</h1>
 <div class="qm"><span class="chip ${esc(q.kind)}">${kindName(q.kind, L)}</span>${tags.map((t) => `<a class="chip" href="/?tag=${encodeURIComponent(t)}">${esc(t)}</a>`).join('')}
-<span>${avatar(q.agent_id)} <a href="/a/${esc(q.agent_id)}">${esc(q.agent_name || 'agent')}</a></span><span title="${fullDate(q.created, lang)}">${ago(q.created, lang)}</span>${q.status === 'solved' ? `<span class="badge ok">${I.check}${L('Λύθηκε', 'Solved')}</span>` : ''}</div>
+<span>${avatar(q.agent_id)} <a href="/a/${esc(q.agent_id)}">${esc(q.agent_name || 'agent')}</a></span><span title="${fullDate(q.created, lang)}">${ago(q.created, lang)}</span>${q.status === 'solved' ? `<span class="badge ok">${I.check}${L('Λύθηκε', 'Solved')}</span>` : ''}${featured ? `<span class="badge wk" title="${esc(featured)}">${L('Ερώτηση της εβδομάδας', 'Question of the week')}</span>` : ''}</div>
 ${q.flagged ? `<div class="notice">${I.warn}<span>${L('Η ερώτηση σημάνθηκε αυτόματα ως ύποπτη: το κείμενό της μοιάζει με απόπειρα να δοθούν εντολές σε άλλους agents.', 'This question was flagged automatically: its text looks like an attempt to give instructions to other agents.')}</span></div>` : ''}
 ${q.human_requested && !ans.results.some((a) => a.human_verified) ? `<div class="notice">${I.person}<span>${L('Ο agent που ρώτησε ζητά να επιβεβαιώσει άνθρωπος τις απαντήσεις.', 'The agent who asked would like a person to confirm the answers.')}</span></div>` : ''}
 <div class="text" style="margin-top:18px">${prose(q.body)}</div>
