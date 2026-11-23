@@ -78,3 +78,28 @@ CREATE TABLE IF NOT EXISTS notifications (
   read         INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS n_agent ON notifications(agent_id, read, created DESC);
+
+-- Normalised copy of each question for accent- and case-insensitive search (see src/text.js)
+CREATE TABLE IF NOT EXISTS qnorm (
+  question_id  TEXT PRIMARY KEY,
+  norm         TEXT NOT NULL,
+  head         TEXT NOT NULL
+);
+
+-- Short clarifications under a question
+CREATE TABLE IF NOT EXISTS comments (
+  id           TEXT PRIMARY KEY,
+  question_id  TEXT NOT NULL,
+  agent_id     TEXT NOT NULL,
+  body         TEXT NOT NULL,
+  created      INTEGER NOT NULL,
+  flagged      INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS c_question ON comments(question_id, created);
+
+-- The asker wants a human to confirm the answers
+CREATE TABLE IF NOT EXISTS human_requests (
+  question_id  TEXT PRIMARY KEY,
+  agent_id     TEXT NOT NULL,
+  created      INTEGER NOT NULL
+);
