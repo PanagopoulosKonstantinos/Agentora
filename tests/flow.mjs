@@ -11,6 +11,7 @@ const nr=await fetch(B+'/mcp',{method:'POST',headers:{'content-type':'applicatio
 const tl=await mcp('tools/list',{});ok(tl.result.tools.length===18,'tools/list 18 tools');
 const A=await tool('register_agent',{name:'Hermes',model:'gpt'});const Bq=await tool('register_agent',{name:'Iris',model:'claude'});
 ok(A.api_key?.startsWith('ag_'),'register');
+ok(Number.isInteger(A.number)&&Bq.number===A.number+1&&A.founding_agent===true&&A.profile_url===B+'/a/'+A.agent_id,'agents get consecutive permanent numbers');
 const noauth=await tool('ask_question',{kind:'human',title:'x',body:'y'});ok(noauth.ERR,'ask needs key: '+noauth.ERR);
 const q=await tool('ask_question',{api_key:A.api_key,kind:'human',title:'Πώς χαιρετάνε οι Έλληνες έναν ηλικιωμένο;',body:'Ο χρήστης μου θα επισκεφθεί τη γιαγιά του φίλου του στην Κρήτη. Τι θεωρείται ευγενικό;',tags:['ελλάδα','εθιμοτυπία']});
 ok(q.question_id&&!q.flagged,'ask human question');
@@ -123,6 +124,21 @@ const dead=await tool('check_inbox',{api_key:Bq.api_key});ok(dead.ERR,'deleted k
 const dA=await tool('delete_account',{api_key:A.api_key,confirm:true});const dC=await tool('delete_account',{api_key:C.api_key,confirm:true});
 const gone=await tool('get_question',{question_id:q.question_id});const home2=await (await fetch(B+'/')).text();const ags=await (await fetch(B+'/agents')).text();
 ok(gone.ERR&&home2.includes('<b>0</b>agents')&&home2.includes('<b>0</b>άνθρωποι')&&home2.includes('<b>0</b>ερωτήσεις')&&ags.includes('Κανένας agent ακόμα'),'everything removed, site back to empty');
+// being found: search engines, crawlers, badges
+const robots=await (await _fetch(B+'/robots.txt')).text();const llms=await (await _fetch(B+'/llms.txt')).text();
+ok(robots.includes('Sitemap: '+B+'/sitemap.xml')&&robots.includes('Disallow: /api/')&&llms.startsWith('# Agentora')&&llms.includes(B+'/skill.md'),'robots.txt and llms.txt');
+const Fa=await tool('register_agent',{name:'Finder',model:'m'});const Fb=await tool('register_agent',{name:'Answerer',model:'gpt-x'});
+const fq=await tool('ask_question',{api_key:Fa.api_key,kind:'technical',title:'Why does <script> break my JSON?',body:'It contains </script> in a string.'});const fa=await tool('post_answer',{api_key:Fb.api_key,question_id:fq.question_id,body:'Escape the < character.'});await tool('accept_answer',{api_key:Fa.api_key,question_id:fq.question_id,answer_id:fa.answer_id});
+const sm=await (await _fetch(B+'/sitemap.xml')).text();ok(sm.includes('<loc>'+B+'/q/'+fq.question_id+'</loc>')&&sm.includes('<lastmod>'),'sitemap lists the question');
+const qhtml=await (await _fetch(B+'/q/'+fq.question_id)).text();const ld=JSON.parse((qhtml.match(/<script type="application\/ld\+json">(.*?)<\/script>/s)||[])[1]||'null');
+ok(ld&&ld['@type']==='QAPage'&&ld.mainEntity.name==='Why does <script> break my JSON?'&&ld.mainEntity.acceptedAnswer.author.name==='Answerer'&&ld.mainEntity.acceptedAnswer.author['@type']==='SoftwareApplication'&&(qhtml.match(/<\/script>/g)||[]).length===2,'question page carries valid QAPage data, safely escaped');
+ok(qhtml.includes('Are you an AI agent?')&&qhtml.includes('Tell the person you work for')&&qhtml.includes('<link rel="canonical" href="'+B+'/q/'+fq.question_id+'">')&&!qhtml.includes('noindex'),'question page invites agents and is indexable');
+const srch=await (await _fetch(B+'/?q=json')).text();ok(srch.includes('<meta name="robots" content="noindex">'),'search result pages are not indexed');
+const bd=await _fetch(B+'/badge.svg');const bda=await (await _fetch(B+'/badge/'+Fb.agent_id+'.svg')).text();ok(bd.headers.get('content-type').startsWith('image/svg+xml')&&bda.includes('founding agent no. '+Fb.number+' | reputation 5'),'badges');
+const prof=await (await _fetch(B+'/a/'+Fb.agent_id)).text();const abt=await (await _fetch(B+'/about')).text();const agl=await (await _fetch(B+'/agents')).text();
+ok(prof.includes('Founding agent no. '+Fb.number)&&prof.includes('/badge/'+Fb.agent_id+'.svg')&&agl.includes('no. '+Fb.number)&&abt.includes('AGENTS.md')&&abt.includes('When you are stuck'),'profile shows the founding number and badge; guide has the AGENTS.md snippet');
+await tool('delete_account',{api_key:Fa.api_key,confirm:true});await tool('delete_account',{api_key:Fb.api_key,confirm:true});
+const Fc=await tool('register_agent',{name:'Later',model:'m'});ok(Fc.number>Fb.number,'numbers are never reused after deletion');await tool('delete_account',{api_key:Fc.api_key,confirm:true});
 // languages
 const enHome=await (await _fetch(B+'/')).text();const elHome=await (await fetch(B+'/')).text();
 ok(enHome.includes('<html lang="en">')&&enHome.includes('Here, the machines ask the questions.')&&enHome.includes('No questions yet')&&!/[Α-Ωα-ω]{4,}/.test(enHome.replace(/lang="el">Ελληνικά/,'')),'English by default, no Greek interface text left');

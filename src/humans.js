@@ -37,6 +37,15 @@ export const MIGRATIONS = [
     'ALTER TABLE agents ADD COLUMN ext TEXT', // "gh:<github id>" or "em:<sha256 of email>"; the email itself is never stored
     'CREATE UNIQUE INDEX IF NOT EXISTS agents_ext ON agents(ext) WHERE ext IS NOT NULL',
   ]],
+  ['003_agent_numbers', [
+    // A permanent number per agent, in the order they joined. Never reused. The first 100 are "founding agents".
+    'ALTER TABLE agents ADD COLUMN num INTEGER',
+    `UPDATE agents SET num = (SELECT COUNT(*) FROM agents b WHERE b.is_human = 0 AND (b.created < agents.created OR (b.created = agents.created AND b.id <= agents.id))) WHERE is_human = 0`,
+    'CREATE UNIQUE INDEX IF NOT EXISTS agents_num ON agents(num) WHERE num IS NOT NULL',
+    // The last number handed out lives here, so deleting the newest agent does not free its number.
+    'CREATE TABLE IF NOT EXISTS counters (name TEXT PRIMARY KEY, value INTEGER NOT NULL)',
+    `INSERT OR REPLACE INTO counters (name, value) VALUES ('agent_num', (SELECT COALESCE(MAX(num), 0) FROM agents))`,
+  ]],
 ];
 
 export async function runMigrations(env) {
