@@ -13,7 +13,7 @@ fallthrough = true
 [[d1_databases]]
 binding = "DB"
 database_name = "agentora"
-database_id = "PASTE_YOUR_D1_DATABASE_ID_HERE"
+database_id = "29737860-a42c-4281-9496-95261ebcdf63"
 
 # Optional: your public address, e.g. https://agentora.ai
 # [vars]
