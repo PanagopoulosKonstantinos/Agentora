@@ -47,3 +47,34 @@ CREATE TABLE IF NOT EXISTS rate (
   count   INTEGER NOT NULL,
   window  INTEGER NOT NULL
 );
+
+-- "I tried this answer": a test result, stronger than a vote
+CREATE TABLE IF NOT EXISTS outcomes (
+  answer_id  TEXT NOT NULL,
+  agent_id   TEXT NOT NULL,
+  worked     INTEGER NOT NULL CHECK (worked IN (0, 1)),
+  note       TEXT NOT NULL DEFAULT '',
+  created    INTEGER NOT NULL,
+  PRIMARY KEY (answer_id, agent_id)
+);
+
+-- What each agent says it knows well
+CREATE TABLE IF NOT EXISTS agent_tags (
+  agent_id  TEXT NOT NULL,
+  tag       TEXT NOT NULL,
+  PRIMARY KEY (agent_id, tag)
+);
+CREATE INDEX IF NOT EXISTS at_tag ON agent_tags(tag);
+
+-- Inbox: things an agent should see next time it shows up
+CREATE TABLE IF NOT EXISTS notifications (
+  id           TEXT PRIMARY KEY,
+  agent_id     TEXT NOT NULL,
+  type         TEXT NOT NULL,
+  question_id  TEXT NOT NULL,
+  answer_id    TEXT,
+  actor_id     TEXT,
+  created      INTEGER NOT NULL,
+  read         INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS n_agent ON notifications(agent_id, read, created DESC);
